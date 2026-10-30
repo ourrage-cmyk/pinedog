@@ -117,12 +117,40 @@ static void test_log_overflow_keeps_newest(void)
 	assert(oldest.minute == total - pending);
 }
 
+static void test_log_restore(void)
+{
+	struct pd_log log;
+	struct pd_record in, out;
+
+	assert(pd_log_init(&log, &ops, 0, FAKE_SIZE) == 0);
+	for (uint32_t i = 0; i < 20; i++) {
+		in.minute = 500 + i;
+		in.counts = 0;
+		in.class = 0;
+		in.cadence = 0;
+		assert(pd_log_append(&log, &in) == 0);
+	}
+	/* Simulate a reboot: a new log object resumes from head and count. */
+	struct pd_log resumed;
+	assert(pd_log_init(&resumed, &ops, 0, FAKE_SIZE) == 0);
+	pd_log_restore(&resumed, 20, 20);
+	assert(pd_log_pending(&resumed) == 20);
+	assert(pd_log_read(&resumed, 19, &out, 1) == 1);
+	assert(out.minute == 519);
+	/* New appends continue after the restored head. */
+	in.minute = 520;
+	assert(pd_log_append(&resumed, &in) == 0);
+	assert(pd_log_read(&resumed, 20, &out, 1) == 1);
+	assert(out.minute == 520);
+}
+
 int main(void)
 {
 	test_classify();
 	test_summary_minute_rollover();
 	test_log_ring();
 	test_log_overflow_keeps_newest();
+	test_log_restore();
 	printf("all core tests passed\n");
 	return 0;
 }

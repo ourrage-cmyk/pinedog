@@ -33,10 +33,11 @@ touch controller, vibration motor.
 ### 1. Firmware (`firmware/`, Zephyr RTOS)
 
 A small Zephyr application instead of a stripped InfiniTime. Zephyr already
-supports the PineTime board, gives us tickless low-power idle, a BLE stack,
-and an MCUboot-compatible image, so it can be installed **over the air from
-stock InfiniTime** (same bootloader) without opening the watch, and the
-bootloader's recovery firmware still lets you go back.
+supports the PineTime board, with its BLE stack and a BMA4xx accelerometer
+driver. The first version flashes the whole chip over SWD and replaces
+InfiniTime (see `docs/FIRMWARE.md`). Over-the-air updates over the stock
+InfiniTime bootloader are not used, because that needs signing keys we do not
+have.
 
 Sampling loop:
 

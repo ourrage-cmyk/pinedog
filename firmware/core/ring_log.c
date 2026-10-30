@@ -98,3 +98,16 @@ uint32_t pd_log_pending(const struct pd_log *log)
 {
 	return log->count;
 }
+
+void pd_log_restore(struct pd_log *log, uint32_t head, uint32_t count)
+{
+	log->head = head % log->capacity;
+	log->count = count > log->capacity ? log->capacity : count;
+	log->tail = (log->head + log->capacity - log->count) % log->capacity;
+}
+
+int pd_log_peek_slot(struct pd_log *log, uint32_t slot, struct pd_record *out)
+{
+	return log->ops->read(log->ops->ctx, rec_addr(log, slot), out,
+			      PD_LOG_REC_SIZE);
+}

@@ -43,5 +43,9 @@ int pd_log_read(struct pd_log *log, uint32_t idx, struct pd_record *out,
 /* Mark everything before minute (inclusive) as synced, frees ring space. */
 void pd_log_ack_upto(struct pd_log *log, uint32_t minute);
 uint32_t pd_log_pending(const struct pd_log *log);
+/* Reads one physical slot, used to find records written after a checkpoint. */
+int pd_log_peek_slot(struct pd_log *log, uint32_t slot, struct pd_record *out);
+/* Resume after reboot with the head and count saved at the last checkpoint. */
+void pd_log_restore(struct pd_log *log, uint32_t head, uint32_t count);
 
 #endif
