@@ -196,3 +196,19 @@ def test_schedule_gates_attempts():
     # After a failure, retry sooner, but not on every advertisement.
     assert not should_attempt(now, now - timedelta(seconds=30), True)
     assert should_attempt(now, now - RETRY_INTERVAL, True)
+
+
+def test_short_stream_is_not_acked():
+    """Status says 5 records pending but only 2 arrived before the end marker.
+
+    Ack is a count of the oldest records, so acking 2 after a lost middle
+    chunk would drop the wrong records on the watch. HA must not ack a stream
+    that is shorter than the pending count it read.
+    """
+    link = FakeLink(pending=5)  # default chunks carry 2 records
+
+    async def persist(records):
+        pass
+
+    _run(link, persist)
+    assert not any(c[0] == "ack" for c in link.calls)
