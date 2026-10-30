@@ -12,7 +12,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .activity import DailyTotals, Record, baseline_status, daily_totals
+from .activity import Baseline, DailyTotals, Record, compute_baseline, daily_totals
 from .transfer import FUTURE_SLACK_MINUTES
 from .protocol import sync_requested
 from .schedule import should_attempt
@@ -22,14 +22,14 @@ from .transfer import IncompleteTransfer, TransferResult
 _LOGGER = logging.getLogger(__name__)
 
 STORE_VERSION = 1
-KEEP_DAYS = 60
+KEEP_DAYS = 90  # the baseline reads up to WINDOW_DAYS; keep a margin
 LOW_BATTERY_PCT = 20
 
 
 @dataclass
 class PinedogData:
     today: DailyTotals | None = None
-    baseline: str = "learning"
+    baseline: Baseline = field(default_factory=lambda: Baseline("learning", None, None, 0.0, 0))
     last_sync: datetime | None = None
     last_error: str | None = None
     battery_pct: int | None = None
@@ -97,9 +97,9 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         history = self._history()
         today_key = dt_util.now().date()
         today = next((d for d in history if d.day == today_key), None)
-        base = "learning"
+        base = Baseline("waiting", None, None, 0.0, 0)
         if today is not None:
-            base = baseline_status(today, history)
+            base = compute_baseline(today, history)
         return PinedogData(
             today=today,
             baseline=base,
