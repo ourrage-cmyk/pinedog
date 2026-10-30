@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import PinedogCoordinator
 
-BASELINE_OPTIONS = ["learning", "below", "normal", "above"]
+BASELINE_OPTIONS = ["learning", "waiting", "below", "normal", "above"]
 
 
 async def async_setup_entry(
@@ -25,7 +25,10 @@ async def async_setup_entry(
             PinedogMinutesSensor(coordinator, entry, "sedentary", "Sedentary time today", "sedentary_minutes"),
             PinedogMinutesSensor(coordinator, entry, "walking", "Walking time today", "walking_minutes"),
             PinedogMotionSensor(coordinator, entry),
+            PinedogWearSensor(coordinator, entry),
             PinedogBaselineSensor(coordinator, entry),
+            PinedogBaselinePercentSensor(coordinator, entry),
+            PinedogBaselineConfidenceSensor(coordinator, entry),
             PinedogLastSyncSensor(coordinator, entry),
         ]
     )
@@ -76,6 +79,20 @@ class PinedogMotionSensor(_Base):
         return today.motion_counts if today else 0
 
 
+class PinedogWearSensor(_Base):
+    _attr_native_unit_of_measurement = "min"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:watch-variant"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "wear", "Wear time today")
+
+    @property
+    def native_value(self) -> int:
+        today = self.coordinator.data.today
+        return today.active_minutes + today.sedentary_minutes if today else 0
+
+
 class PinedogBaselineSensor(_Base):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = BASELINE_OPTIONS
@@ -86,7 +103,42 @@ class PinedogBaselineSensor(_Base):
 
     @property
     def native_value(self) -> str:
-        return self.coordinator.data.baseline
+        return self.coordinator.data.baseline.status
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        base = self.coordinator.data.baseline
+        return {
+            "expected_motion_counts": None if base.expected_counts is None else round(base.expected_counts),
+            "days_learned": base.days_learned,
+        }
+
+
+class PinedogBaselinePercentSensor(_Base):
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:percent"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "baseline_percent", "Activity vs baseline percent")
+
+    @property
+    def native_value(self) -> int | None:
+        percent = self.coordinator.data.baseline.percent
+        return None if percent is None else round(percent)
+
+
+class PinedogBaselineConfidenceSensor(_Base):
+    _attr_native_unit_of_measurement = "%"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:school"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "baseline_confidence", "Baseline confidence")
+
+    @property
+    def native_value(self) -> int:
+        return round(100 * self.coordinator.data.baseline.confidence)
 
 
 class PinedogLastSyncSensor(_Base):

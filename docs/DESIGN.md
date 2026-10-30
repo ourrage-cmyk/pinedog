@@ -118,10 +118,13 @@ Entities:
 - Sedentary time today (rest minutes)
 - Walking time today (walk + run minutes)
 - Motion today (sum of counts)
-- Activity vs baseline (today's motion as % of the 7-day rolling average at the
-  same time of day)
-- Exercise status: `below`, `normal` or `above` baseline, once 7 days of data
-  exist (`learning` until then)
+- Activity vs baseline: today's estimated full-day motion as a percent of the
+  learned expectation for that weekday (100 = typical). See `docs/ACTIVITY.md`.
+- Baseline status: `learning` until 7 valid days exist, then `waiting` (too
+  little of today worn yet), `below`, `normal` or `above`
+- Baseline confidence: how much of the expectation comes from data rather than
+  the population prior
+- Wear time today, so partly worn days are easy to spot
 - Battery, last sync, unsynced records
 
 Daily totals for the previous days are kept as statistics, so the standard

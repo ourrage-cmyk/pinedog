@@ -1,0 +1,51 @@
+# Sample Lovelace dashboard for the Pinedog collar.
+# Entity IDs follow Home Assistant's naming for the "Pinedog collar" device.
+# Paste into a dashboard in YAML mode, or adjust to taste.
+title: Pinedog
+views:
+  - title: Dog
+    path: dog
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Today
+            entities:
+              - entity: sensor.pinedog_collar_activity_vs_baseline
+                name: Status
+              - entity: sensor.pinedog_collar_activity_vs_baseline_percent
+                name: Motion vs usual
+              - entity: sensor.pinedog_collar_active_time_today
+              - entity: sensor.pinedog_collar_walking_time_today
+              - entity: sensor.pinedog_collar_sedentary_time_today
+              - entity: sensor.pinedog_collar_wear_time_today
+              - entity: sensor.pinedog_collar_motion_today
+          - type: gauge
+            entity: sensor.pinedog_collar_activity_vs_baseline_percent
+            name: Motion vs usual
+            min: 0
+            max: 200
+            severity:
+              green: 75
+              yellow: 50
+              red: 0
+      - type: statistics-graph
+        title: Active and walking time, last 7 days
+        days_to_show: 7
+        period: day
+        stat_types:
+          - mean
+        chart_type: bar
+        entities:
+          - sensor.pinedog_collar_active_time_today
+          - sensor.pinedog_collar_walking_time_today
+      - type: history-graph
+        title: Motion vs usual
+        hours_to_show: 168
+        entities:
+          - entity: sensor.pinedog_collar_activity_vs_baseline_percent
+      - type: entities
+        title: Diagnostics
+        entities:
+          - entity: sensor.pinedog_collar_baseline_confidence
+          - entity: sensor.pinedog_collar_last_sync
