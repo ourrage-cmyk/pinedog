@@ -208,6 +208,24 @@ Everything below is still to be checked on a real watch:
   certainly too much. Measure for a week before trusting any figure.
 - The activity thresholds. They are guesses and need tuning on real data.
 
+## License
+
+MIT (see `LICENSE`). Zephyr is Apache-2.0 and is compatible.
+
+The battery voltage-to-percent table and the charging and power pins in
+`firmware/app/src/battery.c` match InfiniTime's values, which are in its GPL-3.0
+source (`BatteryController.cpp`, `PinMap.h`). The code here is written from
+scratch; the table values are measurements of the same LiPo and divider, and
+are not copied from InfiniTime's code. If you need a stricter reading, the owner
+should check that before reusing the image commercially. The stock firmware
+images are not included in this repo.
+
+## GitHub repo settings (optional)
+
+The repository description and topics are optional. HACS shows them, but they
+are not needed to install or use the integration from a custom repository. The
+validation workflow skips them, and brand assets, for that reason.
+
 ## Releasing a version
 
 The version lives in `custom_components/pinedog/manifest.json`. HACS installs a

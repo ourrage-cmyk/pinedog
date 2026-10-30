@@ -15,6 +15,9 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+          # Optional GitHub settings (description, topics) and brand assets are not
+          # needed for a personal custom repository. Skip them so the check passes.
+          ignore: "brands description topics"
 
   hassfest:
     name: Hassfest validation
