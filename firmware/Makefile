@@ -7,7 +7,7 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Werror -g -Icore
 test: build/test_core
 	./build/test_core
 
-build/test_core: test/test_core.c core/minute_summary.c core/ring_log.c
+build/test_core: test/test_core.c core/minute_summary.c core/ring_log.c core/journal.c
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $^
 

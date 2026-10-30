@@ -2,23 +2,15 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/storage/flash_map.h>
+#include <zephyr/sys/printk.h>
 
+#include "journal.h"
 #include "ring_log.h"
 #include "store.h"
 
-#define META_MAGIC 0x50444C47 /* "PDLG" */
-#define CHECKPOINT_EVERY 60   /* appends, about hourly */
-
-struct meta {
-	uint32_t magic;
-	uint32_t head;
-	uint32_t count;
-} __attribute__((packed));
-
 static const struct flash_area *fa;
 static struct pd_log log;
-static uint32_t meta_off;
-static uint32_t appends_since_checkpoint;
+static struct pd_journal journal;
 static K_MUTEX_DEFINE(store_mutex);
 
 static int fa_read(void *ctx, uint32_t addr, void *buf, size_t len)
@@ -43,17 +35,15 @@ static struct pd_flash_ops ops = {
 	.program = fa_program,
 };
 
-/* The last sector of the partition holds the checkpoint, the rest is the ring. */
-static int read_meta(struct meta *m)
-{
-	return flash_area_read(fa, meta_off, m, sizeof(*m));
-}
-
+/*
+ * The last PD_JOURNAL_SECTORS sectors of the partition hold the checkpoint
+ * journal. The rest is the record ring.
+ */
 int store_init(void)
 {
 	uint32_t ring_size;
-	struct meta m;
 	uint32_t head = 0, count = 0;
+	bool found;
 	int rc;
 
 	rc = flash_area_open(FIXED_PARTITION_ID(storage_partition), &fa);
@@ -61,51 +51,42 @@ int store_init(void)
 		return rc;
 	}
 
-	ring_size = fa->fa_size - PD_LOG_SECTOR_SIZE;
-	meta_off = ring_size;
+	ring_size = fa->fa_size - PD_JOURNAL_SECTORS * PD_LOG_SECTOR_SIZE;
 	ops.ctx = (void *)fa;
 	rc = pd_log_init(&log, &ops, 0, ring_size);
 	if (rc) {
 		return rc;
 	}
-
-	if (read_meta(&m) == 0 && m.magic == META_MAGIC) {
-		head = m.head;
-		count = m.count;
+	rc = pd_journal_open(&journal, &ops, ring_size, &found, &head, &count);
+	if (rc) {
+		return rc;
 	}
-	pd_log_restore(&log, head, count);
-
-	/*
-	 * Records written after the last checkpoint are still in flash. Walk
-	 * forward from the checkpoint over slots that were programmed.
-	 */
-	for (;;) {
-		struct pd_record r;
-
-		if (pd_log_pending(&log) >= log.capacity) {
-			break;
-		}
-		if (pd_log_peek_slot(&log, log.head, &r)) {
-			break;
-		}
-		if (r.minute == 0xFFFFFFFF) {
-			break;
-		}
-		pd_log_restore(&log, (log.head + 1) % log.capacity, pd_log_pending(&log) + 1);
+	if (found) {
+		pd_log_restore(&log, head, count);
 	}
 	return 0;
 }
 
+static void checkpoint_locked(void)
+{
+	if (pd_journal_write(&journal, log.head, log.count)) {
+		printk("checkpoint write failed\n");
+	}
+}
+
 int store_append(const struct pd_record *rec)
 {
-	int rc = pd_log_append(&log, rec);
+	int rc;
 
+	if (pd_log_needs_erase(&log)) {
+		pd_log_drop_for_next(&log);
+		checkpoint_locked();
+	}
+	rc = pd_log_append(&log, rec);
 	if (rc) {
 		return rc;
 	}
-	if (++appends_since_checkpoint >= CHECKPOINT_EVERY) {
-		store_checkpoint();
-	}
+	checkpoint_locked();
 	return 0;
 }
 
@@ -117,7 +98,7 @@ int store_read(uint32_t index, struct pd_record *out, uint32_t max)
 void store_ack(uint32_t minute)
 {
 	pd_log_ack_upto(&log, minute);
-	store_checkpoint();
+	checkpoint_locked();
 }
 
 uint32_t store_pending(void)
@@ -127,17 +108,7 @@ uint32_t store_pending(void)
 
 void store_checkpoint(void)
 {
-	struct meta m = {
-		.magic = META_MAGIC,
-		.head = log.head,
-		.count = log.count,
-	};
-
-	appends_since_checkpoint = 0;
-	if (flash_area_erase(fa, meta_off, PD_LOG_SECTOR_SIZE)) {
-		return;
-	}
-	flash_area_write(fa, meta_off, &m, sizeof(m));
+	checkpoint_locked();
 }
 
 void store_lock(void)

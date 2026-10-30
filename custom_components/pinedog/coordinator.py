@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 import logging
 
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
@@ -13,12 +13,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .activity import DailyTotals, baseline_status, daily_totals
+from .schedule import should_attempt
 from .sync import async_pull_records
+from .transfer import Pairs
 
 _LOGGER = logging.getLogger(__name__)
 
 STORE_VERSION = 1
-MIN_SYNC_INTERVAL = timedelta(minutes=30)
 KEEP_DAYS = 60
 
 
@@ -44,6 +45,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         self._store: Store[dict] = Store(hass, STORE_VERSION, f"pinedog.{entry_id}")
         self._state = _State()
         self._last_sync: datetime | None = None
+        self._last_attempt: datetime | None = None
         self._last_error: str | None = None
         self._dropped = 0
 
@@ -55,6 +57,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         )
         last = raw.get("last_sync")
         self._last_sync = datetime.fromisoformat(last) if last else None
+        self._last_attempt = self._last_sync
         self.data = self._build()
 
     def _history(self) -> list[DailyTotals]:
@@ -87,8 +90,9 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         )
 
     async def _async_update_data(self) -> PinedogData:
-        if self._last_sync and dt_util.utcnow() - self._last_sync < MIN_SYNC_INTERVAL:
+        if not self._attempt_allowed():
             return self._build()
+        self._last_attempt = dt_util.utcnow()
         try:
             await self._sync()
             self._last_error = None
@@ -97,26 +101,39 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             _LOGGER.debug("Pinedog sync failed: %s", err)
         return self._build()
 
-    async def _sync(self) -> None:
-        pairs = await async_pull_records(
-            self.hass, self.address, self._state.last_acked_minute + 1
+    def _attempt_allowed(self) -> bool:
+        return should_attempt(
+            dt_util.utcnow(), self._last_attempt, self._last_error is not None
         )
-        synced = [rec for rec, ok in pairs if ok]
-        self._dropped += len(pairs) - len(synced)
-        if pairs:
-            self._state.last_acked_minute = max(rec.minute for rec, _ in pairs)
-            tz = dt_util.get_default_time_zone()
-            for day, totals in daily_totals(synced, tz).items():
-                cur = self._state.days.setdefault(
-                    day.isoformat(),
-                    {"active": 0, "sedentary": 0, "walking": 0, "motion": 0},
-                )
-                cur["active"] += totals.active_minutes
-                cur["sedentary"] += totals.sedentary_minutes
-                cur["walking"] += totals.walking_minutes
-                cur["motion"] += totals.motion_counts
-            for key in sorted(self._state.days)[:-KEEP_DAYS]:
-                del self._state.days[key]
+
+    async def _sync(self) -> None:
+        await async_pull_records(
+            self.hass, self.address, self._state.last_acked_minute + 1, self._persist
+        )
+
+    async def _persist(self, pairs: Pairs) -> None:
+        """Store records before the watch is acked. Runs once per transfer.
+
+        The watch may resend records we already counted, for example when an
+        ack was lost. The cursor drops those, so totals are never double counted.
+        """
+        cursor = self._state.last_acked_minute
+        fresh = [(rec, ok) for rec, ok in pairs if rec.minute > cursor]
+        synced = [rec for rec, ok in fresh if ok]
+        self._dropped += len(fresh) - len(synced)
+        tz = dt_util.get_default_time_zone()
+        for day, totals in daily_totals(synced, tz).items():
+            cur = self._state.days.setdefault(
+                day.isoformat(),
+                {"active": 0, "sedentary": 0, "walking": 0, "motion": 0},
+            )
+            cur["active"] += totals.active_minutes
+            cur["sedentary"] += totals.sedentary_minutes
+            cur["walking"] += totals.walking_minutes
+            cur["motion"] += totals.motion_counts
+        for key in sorted(self._state.days)[:-KEEP_DAYS]:
+            del self._state.days[key]
+        self._state.last_acked_minute = max(cursor, max(rec.minute for rec, _ in pairs))
         self._last_sync = dt_util.utcnow()
         await self._store.async_save(
             {
@@ -128,7 +145,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
 
     @callback
     def handle_advertisement(self, info: BluetoothServiceInfoBleak, change) -> None:
-        """Start a sync when the watch is seen, at most once per interval."""
-        if self._last_sync and dt_util.utcnow() - self._last_sync < MIN_SYNC_INTERVAL:
+        """Start a sync when the watch is seen, subject to the attempt schedule."""
+        if not self._attempt_allowed():
             return
         self.hass.async_create_task(self.async_request_refresh())

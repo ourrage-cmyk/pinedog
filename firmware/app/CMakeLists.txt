@@ -9,5 +9,6 @@ target_sources(app PRIVATE
   src/clock.c
   ../core/minute_summary.c
   ../core/ring_log.c
+  ../core/journal.c
 )
 target_include_directories(app PRIVATE ../core)

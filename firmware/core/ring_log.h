@@ -43,9 +43,15 @@ int pd_log_read(struct pd_log *log, uint32_t idx, struct pd_record *out,
 /* Mark everything before minute (inclusive) as synced, frees ring space. */
 void pd_log_ack_upto(struct pd_log *log, uint32_t minute);
 uint32_t pd_log_pending(const struct pd_log *log);
-/* Reads one physical slot, used to find records written after a checkpoint. */
-int pd_log_peek_slot(struct pd_log *log, uint32_t slot, struct pd_record *out);
 /* Resume after reboot with the head and count saved at the last checkpoint. */
 void pd_log_restore(struct pd_log *log, uint32_t head, uint32_t count);
+/*
+ * True when the next append erases a sector. Callers must then checkpoint
+ * after pd_log_drop_for_next() and before pd_log_append(). Otherwise a reboot
+ * during the erase would resume with a tail that points at erased flash.
+ */
+bool pd_log_needs_erase(const struct pd_log *log);
+/* Moves the tail past the records that the next erase would destroy. */
+void pd_log_drop_for_next(struct pd_log *log);
 
 #endif

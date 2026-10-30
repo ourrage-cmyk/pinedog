@@ -74,6 +74,12 @@ erased one sector ahead of the write pointer), holding about a year before
 wrapping. Unsynced data is never lost unless the dog is out of range for a
 year.
 
+The head and count are checkpointed after every append and every ack. The
+checkpoints go into a two-sector journal of 16-byte CRC-protected entries
+(`firmware/core/journal.c`). On boot the newest valid entry wins, so a power
+cut never leaves the watch with an empty or stale ring. See
+`docs/RESEARCH.md` for the reasons.
+
 Button: a short press lights the screen for 5 seconds with battery %, today's
 active minutes and whether the last sync worked. Otherwise the display is off.
 
@@ -83,10 +89,17 @@ active minutes and whether the last sync worked. Otherwise the display is off.
   The advertisement carries battery % and the number of unsynced records, so
   Home Assistant knows whether a connection is worth making.
 - Home Assistant connects when it sees the watch and there is anything to
-  sync. It writes the current time, reads records after its last acknowledged
-  position in 240-byte chunks (30 minutes per notification), then writes back
-  the acknowledged position and disconnects. A full day syncs in a couple of
-  seconds.
+  sync. It writes the current time, requests the records, and receives every
+  pending record in notifications sized to the link MTU (up to 16 records
+  each). It stores them, and only then writes back the highest minute it
+  stored and disconnects. A full day syncs in a couple of seconds.
+- The watch streams all pending records, not only those after the requested
+  minute. Home Assistant drops anything at or below its own cursor, so a lost
+  ack causes a resend but never a double count, and the watch still removes
+  the records it has been acked.
+- Home Assistant does not retry a failed connection on every advertisement.
+  It waits 5 minutes after a failure and 30 minutes after a success
+  (`custom_components/pinedog/schedule.py`).
 - No connection is held open, so the radio is idle except for the short
   advertising bursts.
 
@@ -96,9 +109,9 @@ GATT service `Pinedog`:
 |---|---|---|
 | Time | write | Unix time from Home Assistant |
 | Status | read | battery, firmware version, oldest/newest record, unsynced count |
-| Request | write | "send records starting at minute N" |
+| Request | write | "start a transfer" (value accepted, every pending record is sent) |
 | Records | notify | packed 8-byte records |
-| Ack | write | "everything up to minute N is stored on the HA side" |
+| Ack | write | "everything up to minute N is stored on the HA side" (sent only after storing) |
 | Config | read/write | classifier thresholds, advertising interval |
 
 ### 3. Home Assistant integration (`custom_components/pinedog/`)

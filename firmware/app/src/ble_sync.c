@@ -1,11 +1,16 @@
 /*
  * GATT service that Home Assistant uses to pull the activity log.
  *
- * Sync flow: HA connects, writes Time, reads Status, writes Request with the
- * minute to start from, receives Records notifications, then gets a single
- * 0xEE byte as the end marker. HA writes Ack with the last minute it stored
- * and disconnects. Nothing is acked unless HA says so, so a dropped link
- * leaves every record in flash for the next sync.
+ * Sync flow: HA connects, writes Time, reads Status, writes Request, receives
+ * Records notifications, then gets a single 0xEE byte as the end marker. HA
+ * writes Ack with the last minute it has stored and disconnects. Nothing is
+ * acked unless HA says so, so a dropped link leaves every record in flash for
+ * the next sync.
+ *
+ * The watch always streams every pending record, not only those from the
+ * requested minute. Records that HA already stored are still acked, so they
+ * leave the ring, and HA drops them by its own cursor. Filtering on the
+ * watch would leave acked-but-unremoved records in the ring forever.
  */
 #include <errno.h>
 #include <string.h>
@@ -43,7 +48,6 @@ struct pd_status {
 } __attribute__((packed));
 
 static struct bt_conn *stream_conn;
-static uint32_t stream_from;
 static struct k_work stream_work;
 
 static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -108,13 +112,13 @@ static int notify_retry(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 static ssize_t write_request(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			     const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
-	if (offset != 0 || len != sizeof(stream_from)) {
+	/* The value is accepted for protocol compatibility and otherwise ignored. */
+	if (offset != 0 || len != sizeof(uint32_t)) {
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
 	}
 	if (stream_conn) {
 		return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
 	}
-	memcpy(&stream_from, buf, sizeof(stream_from));
 	stream_conn = bt_conn_ref(conn);
 	k_work_submit(&stream_work);
 	return len;
@@ -139,7 +143,6 @@ BT_GATT_SERVICE_DEFINE(pinedog_svc,
 static void stream_records(struct k_work *work)
 {
 	struct pd_record batch[PD_MAX_BATCH];
-	struct pd_record out[PD_MAX_BATCH];
 	const struct bt_gatt_attr *attr;
 	struct bt_conn *conn = stream_conn;
 	uint16_t payload = bt_gatt_get_mtu(conn) - 3;
@@ -155,7 +158,7 @@ static void stream_records(struct k_work *work)
 	}
 
 	while (ok) {
-		int n, sent = 0;
+		int n;
 
 		store_lock();
 		n = store_read(index, batch, batch_max);
@@ -169,13 +172,7 @@ static void stream_records(struct k_work *work)
 		}
 		index += n;
 
-		for (int i = 0; i < n; i++) {
-			if (batch[i].minute >= stream_from) {
-				out[sent++] = batch[i];
-			}
-		}
-		if (sent > 0 &&
-		    notify_retry(conn, attr, out, sent * sizeof(struct pd_record))) {
+		if (notify_retry(conn, attr, batch, n * sizeof(struct pd_record))) {
 			ok = false;
 		}
 	}

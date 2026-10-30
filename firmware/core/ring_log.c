@@ -9,16 +9,21 @@ static uint32_t rec_addr(const struct pd_log *log, uint32_t idx)
 	return log->base + idx * PD_LOG_REC_SIZE;
 }
 
-/*
- * Called before writing slot head. When head enters a new sector, that sector
- * is erased, which destroys every record in it. Any unacked record in the
- * sector is dropped first by moving the tail past the sector, so the oldest
- * data is discarded explicitly rather than corrupted.
- */
-static int prepare_slot(struct pd_log *log)
+bool pd_log_needs_erase(const struct pd_log *log)
 {
-	if (log->head % RECS_PER_SECTOR != 0) {
-		return 0;
+	return log->head % RECS_PER_SECTOR == 0;
+}
+
+/*
+ * When head enters a new sector, that sector is erased, which destroys every
+ * record in it. Any unacked record in the sector is dropped first by moving
+ * the tail past the sector, so the oldest data is discarded explicitly rather
+ * than read back as erased flash.
+ */
+void pd_log_drop_for_next(struct pd_log *log)
+{
+	if (!pd_log_needs_erase(log)) {
+		return;
 	}
 	while (log->count > 0 &&
 	       (log->tail + log->capacity - log->head) % log->capacity <
@@ -26,6 +31,15 @@ static int prepare_slot(struct pd_log *log)
 		log->tail = (log->tail + 1) % log->capacity;
 		log->count--;
 	}
+}
+
+/* Called before writing slot head. */
+static int prepare_slot(struct pd_log *log)
+{
+	if (!pd_log_needs_erase(log)) {
+		return 0;
+	}
+	pd_log_drop_for_next(log);
 	return log->ops->erase_sector(log->ops->ctx, rec_addr(log, log->head));
 }
 
@@ -104,10 +118,4 @@ void pd_log_restore(struct pd_log *log, uint32_t head, uint32_t count)
 	log->head = head % log->capacity;
 	log->count = count > log->capacity ? log->capacity : count;
 	log->tail = (log->head + log->capacity - log->count) % log->capacity;
-}
-
-int pd_log_peek_slot(struct pd_log *log, uint32_t slot, struct pd_record *out)
-{
-	return log->ops->read(log->ops->ctx, rec_addr(log, slot), out,
-			      PD_LOG_REC_SIZE);
 }
