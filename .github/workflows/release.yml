@@ -1,0 +1,35 @@
+name: Release
+
+# Pushing a tag such as v0.2.1 publishes a GitHub release. HACS offers that tag
+# as the version to install. The tag must match manifest.json.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches manifest version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest=$(python3 -c "import json;print(json.load(open('custom_components/pinedog/manifest.json'))['version'])")
+          if [ "$tag" != "$manifest" ]; then
+            echo "tag v$tag does not match manifest version $manifest" >&2
+            exit 1
+          fi
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Pinedog $GITHUB_REF_NAME" \
+            --notes "Integration version ${GITHUB_REF_NAME#v}. Attached: the firmware image (.hex) for the PineTime and SHA256SUMS. Check the checksum before flashing; see README." \
+            --verify-tag \
+            firmware/release/*.hex firmware/release/SHA256SUMS
