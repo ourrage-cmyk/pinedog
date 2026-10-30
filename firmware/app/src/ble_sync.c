@@ -191,9 +191,7 @@ static void stream_records(struct k_work *work)
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
-	BT_DATA_BYTES(BT_DATA_UUID128_ALL,
-		      0x00, 0x00, 0x0a, 0x0c, 0x1e, 0x0a, 0x9d, 0x2a,
-		      0x8b, 0x4a, 0x0d, 0x7e, 0x00, 0x00, 0x0f, 0x5d),
+	BT_DATA(BT_DATA_UUID128_ALL, svc_uuid.val, sizeof(svc_uuid.val)),
 };
 
 static void advertise(void)
