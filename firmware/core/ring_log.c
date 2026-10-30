@@ -105,9 +105,40 @@ uint32_t pd_log_pending(const struct pd_log *log)
 	return log->count;
 }
 
+/*
+ * After a power cut the journal can be one record behind the flash: the record
+ * programmed after the last checkpoint sits at head. NOR flash only clears
+ * bits, so appending over it would corrupt both records. The record is kept
+ * if it passes its CRC on the next read; otherwise head still moves past it.
+ * Mid-sector only: a sector at a boundary is erased before its first write.
+ */
+static void resync_head(struct pd_log *log)
+{
+	uint8_t buf[PD_LOG_REC_SIZE];
+	bool blank = true;
+
+	if (log->count >= log->capacity || log->head % RECS_PER_SECTOR == 0) {
+		return;
+	}
+	if (log->ops->read(log->ops->ctx, rec_addr(log, log->head), buf, sizeof(buf))) {
+		return;
+	}
+	for (size_t i = 0; i < sizeof(buf); i++) {
+		if (buf[i] != 0xFF) {
+			blank = false;
+			break;
+		}
+	}
+	if (!blank) {
+		log->head = (log->head + 1) % log->capacity;
+		log->count++;
+	}
+}
+
 void pd_log_restore(struct pd_log *log, uint32_t head, uint32_t count)
 {
 	log->head = head % log->capacity;
 	log->count = count > log->capacity ? log->capacity : count;
 	log->tail = (log->head + log->capacity - log->count) % log->capacity;
+	resync_head(log);
 }

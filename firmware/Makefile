@@ -11,7 +11,15 @@ build/test_core: test/test_core.c core/minute_summary.c core/ring_log.c core/jou
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $^
 
+# Bytes the watch sends for a known set of records, read by the Home Assistant loopback test.
+fixture: build/wire_fixture
+	./build/wire_fixture ../tests/ha/fixtures/wire_v2.bin
+
+build/wire_fixture: test/wire_fixture.c core/minute_summary.c
+	@mkdir -p build
+	$(CC) $(CFLAGS) -o $@ $^
+
 clean:
 	rm -rf build
 
-.PHONY: test clean
+.PHONY: test clean fixture

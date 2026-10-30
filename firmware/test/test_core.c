@@ -337,6 +337,54 @@ static void test_reboot_during_erase_keeps_tail_valid(void)
 	assert(out.minute == cap - 1);
 }
 
+/*
+ * Power fails after a record is programmed but before its checkpoint. After
+ * the reboot head points at a slot that is already written. The next append
+ * must not program over it: NOR only clears bits, so the result is garbage.
+ */
+static void test_reboot_between_program_and_checkpoint(void)
+{
+	const uint32_t ring_size = 2 * PD_LOG_SECTOR_SIZE;
+	const uint32_t journal_base = ring_size;
+	struct pd_log log, resumed;
+	struct pd_journal j, jr;
+	struct pd_record in = { 0 }, out;
+	uint32_t head, count;
+	uint8_t boot;
+	bool found;
+
+	memset(fake, 0xff, sizeof(fake));
+	assert(pd_log_init(&log, &ops, 0, ring_size) == 0);
+	assert(pd_journal_open(&j, &ops, journal_base, &found, &head, &count, &boot) == 0);
+
+	in.minute = 1;
+	in.counts = 0x1234;
+	in.crc = pd_record_crc(&in);
+	assert(checkpointed_append(&log, &j, &in) == 0);
+
+	/* Programmed, but power fails before the checkpoint. */
+	in.minute = 2;
+	in.crc = pd_record_crc(&in);
+	assert(pd_log_append(&log, &in) == 0);
+
+	assert(pd_log_init(&resumed, &ops, 0, ring_size) == 0);
+	assert(pd_journal_open(&jr, &ops, journal_base, &found, &head, &count, &boot) == 0);
+	assert(found);
+	pd_log_restore(&resumed, head, count);
+
+	in.minute = 3;
+	in.crc = pd_record_crc(&in);
+	assert(pd_log_append(&resumed, &in) == 0);
+
+	/* Every record the log reports must be intact; the newest is minute 3. */
+	for (uint32_t i = 0; i < pd_log_pending(&resumed); i++) {
+		assert(pd_log_read(&resumed, i, &out, 1) == 1);
+		assert(out.crc == pd_record_crc(&out));
+	}
+	assert(pd_log_read(&resumed, pd_log_pending(&resumed) - 1, &out, 1) == 1);
+	assert(out.minute == 3);
+}
+
 int main(void)
 {
 	test_classify();
@@ -350,6 +398,7 @@ int main(void)
 	test_journal_wraps_sectors();
 	test_ring_with_journal_survives_reboot();
 	test_reboot_during_erase_keeps_tail_valid();
+	test_reboot_between_program_and_checkpoint();
 	printf("all core tests passed\n");
 	return 0;
 }

@@ -64,6 +64,7 @@ static void on_data_ready(const struct device *dev,
 	struct sensor_value xyz[3];
 
 	ARG_UNUSED(trig);
+	watchdog_mark_alive();
 	if (sensor_sample_fetch_chan(dev, SENSOR_CHAN_ACCEL_XYZ)) {
 		return;
 	}

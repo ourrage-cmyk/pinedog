@@ -15,11 +15,14 @@ LOG_MODULE_REGISTER(pd_wdt, LOG_LEVEL_INF);
 static const struct device *wdt = DEVICE_DT_GET(DT_ALIAS(watchdog0));
 static int wdt_channel = -1;
 static struct k_work_delayable feeder;
+/* Fed only while samples keep arriving, so a dead sensor thread leads to a reset. */
+static volatile int64_t last_alive_ms;
+#define ALIVE_WINDOW_MS 15000
 
 static void feed(struct k_work *work)
 {
 	ARG_UNUSED(work);
-	if (wdt_channel >= 0) {
+	if (wdt_channel >= 0 && k_uptime_get() - last_alive_ms < ALIVE_WINDOW_MS) {
 		wdt_feed(wdt, wdt_channel);
 	}
 	k_work_reschedule(&feeder, FEED_PERIOD);
@@ -51,6 +54,7 @@ int watchdog_start(void)
 		LOG_ERR("watchdog setup: %d", rc);
 		return rc;
 	}
+	last_alive_ms = k_uptime_get();
 	k_work_init_delayable(&feeder, feed);
 	k_work_reschedule(&feeder, FEED_PERIOD);
 	LOG_INF("watchdog armed, %d s timeout", TIMEOUT_MS / 1000);
@@ -67,4 +71,9 @@ void watchdog_log_reset_cause(void)
 	} else {
 		LOG_WRN("reset cause unavailable");
 	}
+}
+
+void watchdog_mark_alive(void)
+{
+	last_alive_ms = k_uptime_get();
 }

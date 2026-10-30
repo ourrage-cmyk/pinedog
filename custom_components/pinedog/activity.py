@@ -8,7 +8,7 @@ from __future__ import annotations
 import struct
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 RECORD_FORMAT = "<IHBB"  # minute, counts, class, crc8 (8 bytes, packed, see protocol.py)
 RECORD_SIZE = struct.calcsize(RECORD_FORMAT)
@@ -75,19 +75,32 @@ def daily_totals(records: list[Record], tz: timezone) -> dict[date, DailyTotals]
     }
 
 
-def baseline_status(today: DailyTotals, history: list[DailyTotals]) -> str:
-    """Compare today's motion with the trailing baseline.
+MIN_DAY_WEAR = 12 * 60  # minutes of wear for a prior day to count toward the baseline
+MIN_TODAY_WEAR = 12 * 60  # today is compared only after this much wear, so early mornings are not "below"
 
-    Returns "learning" until BASELINE_DAYS of history exist, otherwise
-    "below", "normal" or "above" based on a +/-25% band around the mean.
+
+def wear_minutes(day: DailyTotals) -> int:
+    return day.active_minutes + day.sedentary_minutes
+
+
+def baseline_status(today: DailyTotals, history: list[DailyTotals]) -> str:
+    """Compare today's motion with the same amount of wear on the prior days.
+
+    Only the BASELINE_DAYS calendar days before today count, and only days with
+    enough wear. Today is compared once it has MIN_TODAY_WEAR minutes, scaled by
+    the mean motion per worn minute of those days. Returns "learning" until
+    there is a baseline, otherwise "below", "normal" or "above" (+/-25%).
     """
-    past = [d for d in history if d.day < today.day][-BASELINE_DAYS:]
-    if len(past) < BASELINE_DAYS:
+    by_day = {d.day: d for d in history if d.day < today.day}
+    wanted = [today.day - timedelta(days=i) for i in range(1, BASELINE_DAYS + 1)]
+    past = [by_day[d] for d in wanted if d in by_day and wear_minutes(by_day[d]) >= MIN_DAY_WEAR]
+    if len(past) < BASELINE_DAYS or wear_minutes(today) < MIN_TODAY_WEAR:
         return "learning"
-    mean = sum(d.motion_counts for d in past) / len(past)
-    if mean == 0:
+    motion_per_minute = sum(d.motion_counts for d in past) / sum(wear_minutes(d) for d in past)
+    expected = motion_per_minute * wear_minutes(today)
+    if expected == 0:
         return "normal" if today.motion_counts == 0 else "above"
-    ratio = today.motion_counts / mean
+    ratio = today.motion_counts / expected
     if ratio < 0.75:
         return "below"
     if ratio > 1.25:

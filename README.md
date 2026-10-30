@@ -1,5 +1,9 @@
 # Pinedog
 
+> **Do not flash v0.2.0.** It never sends the records to Home Assistant, so no
+> data syncs. Use **v0.2.1** (`firmware/release/`). Its changes are listed in
+> `docs/FIRMWARE.md`.
+
 Turns a first-generation PineTime into a dog activity logger. The watch
 records one motion summary per minute, stores it on the watch, and hands it to
 Home Assistant over Bluetooth when the two are in range. Home Assistant shows
@@ -57,7 +61,7 @@ the boot logo, is not in this backup.
 ## Step 3: flash Pinedog
 
 ```sh
-nrfjprog --program pinedog-pinetime-v0.2.0.hex --chiperase --verify --reset
+nrfjprog --program pinedog-pinetime-v0.2.1.hex --chiperase --verify --reset
 ```
 
 - `--chiperase` erases internal flash only. The external SPI flash, where

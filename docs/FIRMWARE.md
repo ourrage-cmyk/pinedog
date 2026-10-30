@@ -1,4 +1,8 @@
-# Firmware reference (Pinedog v0.2.0, PineTime)
+# Firmware reference (Pinedog v0.2.1, PineTime)
+
+> **v0.2.0 is broken and must not be flashed.** Its Records stream never sent
+> the record notifications, so no data reached Home Assistant. v0.2.1 fixes that
+> and the other review findings listed under "Changes in v0.2.1".
 
 Technical reference for the Zephyr app in `firmware/app`. For the step-by-step
 guide to flashing the watch, see [`README.md`](../README.md).
@@ -142,6 +146,44 @@ Release files are in `firmware/release/` with `SHA256SUMS`.
 - **The sync window** depends on Home Assistant seeing the 0xFFFF flag. The HA
   side reads it in `custom_components/pinedog`. Check the diagnostic values
   after a press.
+
+## Changes in v0.2.1
+
+Fixes from the bug review (`/mnt/project-files/pinedog/review/bughunt-findings.md`):
+
+- **Records are notified again.** Each batch is sent before the next is read,
+  and a notify failure aborts the stream with no end marker.
+- **End marker carries a count.** `0xEE` then the number of records sent (u32).
+  Home Assistant acks only when that count equals what it received, and at least
+  the pending count it read. A short stream is never acked.
+- **Power cut after a write.** On restore, a programmed slot at the head
+  (mid-sector) is counted, so the next append does not overwrite it. Covered by
+  `test_reboot_between_program_and_checkpoint`.
+- **Clock.** Home Assistant refuses to sync with an unset clock (before 2023). A
+  record more than 5 minutes in the future is dropped, and the dedupe cursor never
+  moves past now. Duplicate minutes inside one transfer are counted once.
+- **Battery.** The voltage divider's driver already scales for the divider, so
+  the reading is not doubled. Charge and power pins are read live.
+- **Charging.** Every minute on the charger is NOT_WORN (class 4), and HA leaves it
+  out of totals.
+- **Logging.** Windows close on the clock, not on the sample count, so a sparse
+  or stalled sensor still produces a record for every minute.
+- **Watchdog.** Fed only while samples arrive, so a stopped sensor resets the chip.
+- **Baseline.** Uses the 7 calendar days before today, each with at least 12 h
+  of wear. Today is compared only after 12 h of wear.
+- **Sensors.** Minute and motion sensors use `measurement`, so a daily drop to 0
+  does not corrupt long-term statistics.
+
+Known and not fixed:
+
+- **Ack by count during a transfer.** If the ring drops its oldest records during
+  a transfer, the count can release records that were not sent. This only happens
+  when the ring is full (about 88 days unsynced), so it is rare. Fix: take a
+  snapshot of the tail when the Request arrives.
+- **Notify loop is not host-tested.** The host tests cover the record encoder,
+  the CRC, and the Home Assistant decoder and transfer (`tests/ha/test_wire_loopback.py`,
+  fed by `make -C firmware fixture`). The Zephyr notify loop and the BLE stack need the watch.
+- **Pairing debounce.** The button is debounced at 250 ms. Just Works pairing only, inside a 60 s window.
 
 ## Not yet verified on hardware
 

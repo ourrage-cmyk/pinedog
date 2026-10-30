@@ -14,9 +14,13 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from .activity import KNOWN_CLASSES, Record
-from .protocol import Status, WireRecord, decode_chunk, decode_status, is_end_marker
+from .protocol import Status, WireRecord, decode_chunk, decode_end_count, decode_status, is_end_marker
 
 TRANSFER_TIMEOUT_S = 120
+# Home Assistant has no RTC on a Pi. A clock before this is not set yet, so do not sync.
+MIN_PLAUSIBLE_UNIX = 1_672_531_200  # 2023-01-01T00:00:00Z
+# A record more than this many minutes ahead of the clock is treated as corrupt time.
+FUTURE_SLACK_MINUTES = 5
 
 PersistFn = Callable[[list[Record]], Awaitable[None]]
 
@@ -37,13 +41,22 @@ class Link(Protocol):
     async def write_ack(self, count: int) -> None: ...
 
 
+class IncompleteTransfer(RuntimeError):
+    """The watch sent fewer records than it had, so nothing was acked."""
+
+
+class ClockError(RuntimeError):
+    """Home Assistant's own clock is not set, so no record can be placed in time."""
+
+
 @dataclass(frozen=True)
 class TransferResult:
     status: Status | None
-    received: int  # records the watch sent, all of them acked
+    received: int  # records the watch sent
     stored: int  # records persisted
-    corrupt: int  # failed the CRC check, acked and dropped
-    unplaced: int  # made before the clock was set, on a boot we cannot place
+    corrupt: int  # failed the CRC check or the end count, dropped
+    unplaced: int  # could not be placed in time (unknown boot, or in the future)
+    acked: bool = False  # False when the transfer was incomplete and nothing was acked
 
 
 class RecordCollector:
@@ -51,10 +64,12 @@ class RecordCollector:
 
     def __init__(self) -> None:
         self.records: list[WireRecord] = []
+        self.end_count: int | None = None
         self.finished = asyncio.Event()
 
     def feed(self, data: bytes) -> None:
         if is_end_marker(data):
+            self.end_count = decode_end_count(data)
             self.finished.set()
             return
         self.records.extend(decode_chunk(data))
@@ -86,10 +101,12 @@ async def run_transfer(
     repeat after a reboot. If the link drops, the end marker never arrives, or
     persist() raises, the watch is not acked and keeps its records.
     """
+    if now_unix < MIN_PLAUSIBLE_UNIX:
+        raise ClockError("Home Assistant clock is not set, not syncing")
     await link.write_time(now_unix)
     status = decode_status(await link.read_status())
     if status.pending == 0:
-        return TransferResult(status, 0, 0, 0, 0)
+        return TransferResult(status, 0, 0, 0, 0, acked=False)
 
     collector = RecordCollector()
     await link.subscribe(collector.feed)
@@ -100,11 +117,15 @@ async def run_transfer(
         await link.unsubscribe()
 
     wire = collector.records
-    if not wire:
-        return TransferResult(status, 0, 0, 0, 0)
+    # The ack is a count of the oldest records. It is only safe when the watch
+    # sent every record it had: all of them, and at least the pending count read
+    # earlier. Anything else is a short or damaged stream, so nothing is acked.
+    if collector.end_count != len(wire) or len(wire) < status.pending:
+        return TransferResult(status, len(wire), 0, 0, 0, acked=False)
 
     records: list[Record] = []
     corrupt = unplaced = 0
+    latest = now_unix // 60 + FUTURE_SLACK_MINUTES
     for rec in wire:
         if not rec.crc_ok or rec.activity_class not in KNOWN_CLASSES:
             corrupt += 1
@@ -116,9 +137,13 @@ async def run_transfer(
                 unplaced += 1
                 continue
             minute = placed
+        if minute > latest:
+            # A clock error on the watch would otherwise move the dedupe cursor into the future.
+            unplaced += 1
+            continue
         records.append(Record(minute, rec.counts, rec.activity_class))
 
     # Durable on our side first. Acking before this point could lose records.
     await persist(records)
     await link.write_ack(len(wire))
-    return TransferResult(status, len(wire), len(records), corrupt, unplaced)
+    return TransferResult(status, len(wire), len(records), corrupt, unplaced, acked=True)

@@ -7,6 +7,9 @@
  */
 int watchdog_start(void);
 
+/* Call on every sensor sample. Without these calls the watchdog resets the chip. */
+void watchdog_mark_alive(void);
+
 /* Logs the cause of the last reset, if the platform reports one. */
 void watchdog_log_reset_cause(void);
 

@@ -13,10 +13,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .activity import DailyTotals, Record, baseline_status, daily_totals
+from .transfer import FUTURE_SLACK_MINUTES
 from .protocol import sync_requested
 from .schedule import should_attempt
 from .sync import async_pull_records
-from .transfer import TransferResult
+from .transfer import IncompleteTransfer, TransferResult
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -147,6 +148,10 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             self._pending = max(st.pending - result.received, 0)
         self._dropped_corrupt += result.corrupt
         self._dropped_unplaced += result.unplaced
+        if result.status is not None and result.status.pending and not result.acked:
+            raise IncompleteTransfer(
+                f"transfer incomplete: got {result.received} of {result.status.pending} records, nothing acked"
+            )
         if result.corrupt or result.unplaced:
             _LOGGER.warning(
                 "Pinedog sync dropped %d corrupt and %d unplaceable records",
@@ -160,7 +165,15 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         Called with the records already placed in unix time and CRC-checked.
         """
         cursor = self._state.last_stored_minute
-        fresh = [rec for rec in records if rec.minute > cursor]
+        now_min = int(dt_util.utcnow().timestamp()) // 60
+        # Records from the future are a clock error on the watch. Never move the cursor past now.
+        fresh: list[Record] = []
+        seen: set[int] = set()
+        for rec in records:
+            if rec.minute <= cursor or rec.minute > now_min + FUTURE_SLACK_MINUTES or rec.minute in seen:
+                continue
+            seen.add(rec.minute)
+            fresh.append(rec)
         tz = dt_util.get_default_time_zone()
         for day, totals in daily_totals(fresh, tz).items():
             cur = self._state.days.setdefault(
@@ -173,8 +186,8 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             cur["motion"] += totals.motion_counts
         for key in sorted(self._state.days)[:-KEEP_DAYS]:
             del self._state.days[key]
-        if records:
-            self._state.last_stored_minute = max(cursor, max(rec.minute for rec in records))
+        if fresh:
+            self._state.last_stored_minute = max(cursor, max(rec.minute for rec in fresh))
         self._last_sync = dt_util.utcnow()
         await self._store.async_save(
             {

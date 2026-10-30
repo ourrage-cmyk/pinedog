@@ -35,7 +35,7 @@ async def async_setup_entry(
 
 class PinedogMinutesSensor(PinedogEntity, SensorEntity):
     _attr_native_unit_of_measurement = "min"
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator, entry, key, name, field) -> None:
         super().__init__(coordinator, entry, key, name)
@@ -51,7 +51,7 @@ class PinedogMinutesSensor(PinedogEntity, SensorEntity):
 
 
 class PinedogMotionSensor(PinedogEntity, SensorEntity):
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:run"
 
     def __init__(self, coordinator, entry) -> None:

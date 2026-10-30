@@ -221,6 +221,12 @@ static void stream_records(struct k_work *work)
 		n = store_read(index, batch, want);
 		store_unlock();
 		if (n <= 0) {
+			LOG_ERR("log read failed at %u, stream aborted", index);
+			ok = false;
+			break;
+		}
+		if (notify_retry(conn, attr, batch, n * sizeof(struct pd_record))) {
+			LOG_WRN("notify failed, stream aborted; records stay in flash");
 			ok = false;
 			break;
 		}
@@ -228,9 +234,12 @@ static void stream_records(struct k_work *work)
 	}
 
 	if (ok) {
-		uint8_t end = PD_END_MARKER;
+		/* End marker: 0xEE then the count sent, so Home Assistant can check it. */
+		uint8_t end[1 + sizeof(uint32_t)];
 
-		notify_retry(conn, attr, &end, sizeof(end));
+		end[0] = PD_END_MARKER;
+		memcpy(&end[1], &index, sizeof(index));
+		notify_retry(conn, attr, end, sizeof(end));
 	}
 	LOG_INF("stream %s: %u of %u records", ok ? "complete" : "failed", index,
 		snapshot);

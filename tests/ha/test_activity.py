@@ -49,30 +49,54 @@ def test_daily_totals_split_by_day_and_class():
     assert totals[date(2024, 10, 5)].sedentary_minutes == 1
 
 
-def _history(values):
-    start = date(2026, 10, 1)
+def _day(d, motion, wear=720):
+    """A day with the given wear minutes and motion. Wear is split into rest."""
+    return DailyTotals(d, 0, wear, 0, motion)
+
+
+def _history(values, start=date(2026, 10, 1)):
     from datetime import timedelta
-    return [DailyTotals(start + timedelta(days=i), 0, 0, 0, v) for i, v in enumerate(values)]
+    return [_day(start + timedelta(days=i), v) for i, v in enumerate(values)]
 
 
 def test_baseline_learning_until_seven_days():
     hist = _history([1000] * 6)
-    today = DailyTotals(date(2026, 10, 7), 0, 0, 0, 1000)
+    today = _day(date(2026, 10, 7), 1000)
     assert baseline_status(today, hist) == "learning"
 
 
 def test_baseline_bands():
     hist = _history([1000] * 7)
     day = date(2026, 10, 8)
-    assert baseline_status(DailyTotals(day, 0, 0, 0, 700), hist) == "below"
-    assert baseline_status(DailyTotals(day, 0, 0, 0, 1000), hist) == "normal"
-    assert baseline_status(DailyTotals(day, 0, 0, 0, 1300), hist) == "above"
+    assert baseline_status(_day(day, 700), hist) == "below"
+    assert baseline_status(_day(day, 1000), hist) == "normal"
+    assert baseline_status(_day(day, 1300), hist) == "above"
 
 
 def test_baseline_ignores_today_in_history():
-    hist = _history([1000] * 6) + [DailyTotals(date(2026, 10, 8), 0, 0, 0, 9999)]
-    today = DailyTotals(date(2026, 10, 8), 0, 0, 0, 1000)
+    hist = _history([1000] * 6) + [_day(date(2026, 10, 8), 9999)]
+    today = _day(date(2026, 10, 8), 1000)
     assert baseline_status(today, hist) == "learning"
+
+
+def test_baseline_needs_consecutive_calendar_days():
+    # Seven recorded days, but one calendar day is missing: not a baseline.
+    from datetime import timedelta
+    hist = [_day(date(2026, 10, 1) + timedelta(days=i), 1000) for i in range(8) if i != 3]
+    assert baseline_status(_day(date(2026, 10, 9), 1000), hist) == "learning"
+
+
+def test_baseline_does_not_call_early_morning_below():
+    # Two hours into the day, motion is small only because little time has passed.
+    hist = _history([1000] * 7)
+    early = DailyTotals(date(2026, 10, 8), 0, 120, 0, 100)
+    assert baseline_status(early, hist) == "learning"
+
+
+def test_baseline_ignores_days_with_little_wear():
+    # Seven prior days, but the most recent one was barely worn: it does not count.
+    hist = _history([1000] * 6) + [DailyTotals(date(2026, 10, 7), 0, 60, 0, 99999)]
+    assert baseline_status(_day(date(2026, 10, 8), 1000), hist) == "learning"
 
 
 def test_not_worn_minutes_are_left_out_of_totals():

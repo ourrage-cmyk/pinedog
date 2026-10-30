@@ -13,7 +13,8 @@ sys.modules["pinedog"] = _pkg
 
 from pinedog.protocol import (  # noqa: E402
     BATTERY_UNKNOWN, BOOT_SHIFT, END_MARKER, FLAG_CHARGING, FLAG_CLOCK_SYNCED,
-    UNSYNCED_FLAG, crc8, decode_chunk, decode_status, encode_u32, is_end_marker,
+    UNSYNCED_FLAG, crc8, decode_chunk, decode_end_count, decode_status, encode_u32,
+    is_end_marker,
 )
 
 STATUS = struct.Struct("<BBIIIBB")
@@ -61,9 +62,13 @@ def test_decode_status_rejects_wrong_length():
         decode_status(_status()[:15])
 
 
-def test_end_marker():
-    assert is_end_marker(bytes([END_MARKER]))
+def test_end_marker_carries_the_record_count():
+    marker = bytes([END_MARKER]) + struct.pack("<I", 7)
+    assert is_end_marker(marker)
+    assert decode_end_count(marker) == 7
+    assert not is_end_marker(bytes([END_MARKER]))  # old one-byte form is not accepted
     assert not is_end_marker(b"\x00" * 8)
+    assert decode_end_count(b"\x00" * 5) is None
 
 
 def test_chunk_checks_crc_and_splits_class_bits():

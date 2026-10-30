@@ -13,9 +13,9 @@ _pkg = types.ModuleType("pinedog")
 _pkg.__path__ = [str(PKG_DIR)]
 sys.modules["pinedog"] = _pkg
 
-from pinedog.protocol import END_MARKER, UNSYNCED_FLAG, BOOT_SHIFT, crc8  # noqa: E402
+from pinedog.protocol import BOOT_SHIFT, UNSYNCED_FLAG, crc8  # noqa: E402
 from pinedog.schedule import RETRY_INTERVAL, SUCCESS_INTERVAL, should_attempt  # noqa: E402
-from pinedog.transfer import place_unsynced, run_transfer  # noqa: E402
+from pinedog.transfer import ClockError, place_unsynced, run_transfer  # noqa: E402
 from pinedog.protocol import decode_status  # noqa: E402
 
 STATUS = struct.Struct("<BBIIIBB")
@@ -39,9 +39,11 @@ def _chunk(*records: bytes) -> bytes:
 class FakeLink:
     """Records the order of GATT operations so tests can check it."""
 
-    def __init__(self, pending=3, chunks=None, end=True, ack_error=None):
-        self.pending = pending
+    def __init__(self, pending=None, chunks=None, end=True, ack_error=None, end_count=None):
         self.chunks = chunks if chunks is not None else [_chunk(_record(100, 1), _record(101, 2))]
+        total = sum(len(c) // 8 for c in self.chunks)
+        self.pending = total if pending is None else pending
+        self.end_count = total if end_count is None else end_count
         self.end = end
         self.ack_error = ack_error
         self.calls: list = []
@@ -66,7 +68,7 @@ class FakeLink:
         for chunk in self.chunks:
             self._on_data(chunk)
         if self.end:
-            self._on_data(bytes([END_MARKER]))
+            self._on_data(bytes([0xEE]) + struct.pack("<I", self.end_count))
 
     async def write_ack(self, count):
         self.calls.append(("ack", count))
@@ -145,6 +147,41 @@ def test_corrupt_records_are_acked_but_not_stored():
     assert link.calls[-1] == ("ack", 2)  # released from the watch, not kept forever
 
 
+def test_end_count_mismatch_is_not_acked():
+    link = FakeLink(pending=2, end_count=3)
+
+    async def persist(records):
+        raise AssertionError("must not persist an inconsistent stream")
+
+    result = _run(link, persist)
+    assert not result.acked
+    assert not any(c[0] == "ack" for c in link.calls)
+
+
+def test_clock_not_set_refuses_to_sync():
+    link = FakeLink()
+
+    async def persist(records):
+        raise AssertionError("no sync with an unset clock")
+
+    with pytest.raises(ClockError):
+        asyncio.run(run_transfer(link, 0, persist, timeout_s=0.1))
+    assert link.calls == []
+
+
+def test_future_dated_record_is_not_stored():
+    # A watch with a wrong clock must not move the dedupe cursor into the future.
+    link = FakeLink(chunks=[_chunk(_record(SYNC_UNIX // 60 + 10_000, 1), _record(100, 1))])
+    seen = []
+
+    async def persist(records):
+        seen.extend(records)
+
+    result = _run(link, persist)
+    assert [r.minute for r in seen] == [100]
+    assert result.unplaced == 1 and result.acked
+
+
 def test_nothing_pending_skips_the_transfer():
     link = FakeLink(pending=0)
 
@@ -196,3 +233,19 @@ def test_schedule_gates_attempts():
     # After a failure, retry sooner, but not on every advertisement.
     assert not should_attempt(now, now - timedelta(seconds=30), True)
     assert should_attempt(now, now - RETRY_INTERVAL, True)
+
+
+def test_short_stream_is_not_acked():
+    """Status says 5 records pending but only 2 arrived before the end marker.
+
+    Ack is a count of the oldest records, so acking 2 after a lost middle
+    chunk would drop the wrong records on the watch. HA must not ack a stream
+    that is shorter than the pending count it read.
+    """
+    link = FakeLink(pending=5)  # default chunks carry 2 records
+
+    async def persist(records):
+        pass
+
+    _run(link, persist)
+    assert not any(c[0] == "ack" for c in link.calls)

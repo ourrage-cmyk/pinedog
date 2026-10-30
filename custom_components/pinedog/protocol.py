@@ -111,7 +111,14 @@ def decode_status(data: bytes) -> Status:
 
 
 def is_end_marker(data: bytes) -> bool:
-    return len(data) == 1 and data[0] == END_MARKER
+    return len(data) == 1 + 4 and data[0] == END_MARKER
+
+
+def decode_end_count(data: bytes) -> int | None:
+    """The count of records the watch sent, from the end marker, or None."""
+    if not is_end_marker(data):
+        return None
+    return struct.unpack_from("<I", data, 1)[0]
 
 
 def decode_chunk(data: bytes) -> list[WireRecord]:

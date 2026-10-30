@@ -83,9 +83,10 @@ static void read_battery(struct k_work *work)
 	    sensor_channel_get(vbatt, SENSOR_CHAN_VOLTAGE, &v)) {
 		LOG_ERR("battery read failed");
 	} else {
-		/* SENSOR_CHAN_VOLTAGE is in volts; the divider output is already halved. */
+		/* The voltage-divider driver scales for the divider (full-ohms / output-ohms),
+		 * so SENSOR_CHAN_VOLTAGE is the battery voltage. Do not scale again. */
 		mv = v.val1 * 1000 + v.val2 / 1000;
-		new_pct = mv_to_percent(mv * 2);
+		new_pct = mv_to_percent(mv);
 
 		/* While charging, the reading is high, so cap it below full. */
 		if (charging && new_pct > 99) {
@@ -96,7 +97,7 @@ static void read_battery(struct k_work *work)
 		}
 		if (first || new_pct != percent) {
 			LOG_INF("battery %u%% (%d mV, charging %d, power %d)",
-				new_pct, mv * 2, charging, power_present);
+				new_pct, mv, charging, power_present);
 			percent = new_pct;
 			bt_bas_set_battery_level(percent);
 		}
@@ -132,12 +133,13 @@ uint8_t battery_percent(void)
 	return percent;
 }
 
+/* Read live: the charger can be plugged in between the 5-minute battery readings. */
 bool battery_charging(void)
 {
-	return charging;
+	return gpio_pin_get_raw(gpio0, PIN_CHARGING) == 0;
 }
 
 bool battery_power_present(void)
 {
-	return power_present;
+	return gpio_pin_get_raw(gpio0, PIN_POWER_PRESENT) == 0;
 }
