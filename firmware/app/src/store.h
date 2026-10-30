@@ -18,8 +18,8 @@ int store_append(const struct pd_record *rec);
 /* Reads up to max records starting at index (0 is the oldest pending). */
 int store_read(uint32_t index, struct pd_record *out, uint32_t max);
 
-/* Releases records up to and including minute, then checkpoints. */
-void store_ack(uint32_t minute);
+/* Releases the count oldest records, then checkpoints. */
+void store_ack(uint32_t count);
 
 uint32_t store_pending(void);
 void store_lock(void);

@@ -40,8 +40,12 @@ int pd_log_append(struct pd_log *log, const struct pd_record *rec);
 /* Read up to max records starting at record index idx (oldest-relative). */
 int pd_log_read(struct pd_log *log, uint32_t idx, struct pd_record *out,
 		uint32_t max);
-/* Mark everything before minute (inclusive) as synced, frees ring space. */
-void pd_log_ack_upto(struct pd_log *log, uint32_t minute);
+/*
+ * Releases the n oldest records. Count-based rather than minute-based: uptime
+ * minutes restart at zero after a reboot, so a minute ack could release
+ * records that were never sent.
+ */
+void pd_log_ack_count(struct pd_log *log, uint32_t n);
 uint32_t pd_log_pending(const struct pd_log *log);
 /* Resume after reboot with the head and count saved at the last checkpoint. */
 void pd_log_restore(struct pd_log *log, uint32_t head, uint32_t count);

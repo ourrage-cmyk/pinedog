@@ -94,7 +94,8 @@ active minutes and whether the last sync worked. Otherwise the display is off.
   each). It stores them, and only then writes back the highest minute it
   stored and disconnects. A full day syncs in a couple of seconds.
 - The watch streams all pending records, not only those after the requested
-  minute. Home Assistant drops anything at or below its own cursor, so a lost
+  minute. Acks are counts, not minutes, because uptime minutes restart after a
+  reboot. Home Assistant drops anything at or below its own cursor, so a lost
   ack causes a resend but never a double count, and the watch still removes
   the records it has been acked.
 - Home Assistant does not retry a failed connection on every advertisement.
@@ -109,9 +110,9 @@ GATT service `Pinedog`:
 |---|---|---|
 | Time | write | Unix time from Home Assistant |
 | Status | read | battery, firmware version, oldest/newest record, unsynced count |
-| Request | write | "start a transfer" (value accepted, every pending record is sent) |
+| Request | write | "start a transfer": the watch snapshots its pending count and streams exactly that many records |
 | Records | notify | packed 8-byte records |
-| Ack | write | "everything up to minute N is stored on the HA side" (sent only after storing) |
+| Ack | write | "I stored the N oldest records" (a count, sent only after storing; the watch drops its N oldest) |
 | Config | read/write | classifier thresholds, advertising interval |
 
 ### 3. Home Assistant integration (`custom_components/pinedog/`)

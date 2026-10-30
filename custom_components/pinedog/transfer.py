@@ -34,7 +34,7 @@ class Link(Protocol):
 
     async def request(self, from_minute: int) -> None: ...
 
-    async def write_ack(self, minute: int) -> None: ...
+    async def write_ack(self, count: int) -> None: ...
 
 
 class RecordCollector:
@@ -82,5 +82,6 @@ async def run_transfer(
         return 0
     # Durable on our side first. Acking before this point could lose records.
     await persist(pairs)
-    await link.write_ack(max(rec.minute for rec, _ in pairs))
+    # Count, not minute: the watch releases its N oldest records.
+    await link.write_ack(len(pairs))
     return len(pairs)

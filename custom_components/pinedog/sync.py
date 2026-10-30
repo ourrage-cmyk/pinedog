@@ -39,8 +39,8 @@ class BleakLink:
     async def request(self, from_minute: int) -> None:
         await self._client.write_gatt_char(REQUEST_UUID, encode_u32(from_minute), response=True)
 
-    async def write_ack(self, minute: int) -> None:
-        await self._client.write_gatt_char(ACK_UUID, encode_u32(minute), response=True)
+    async def write_ack(self, count: int) -> None:
+        await self._client.write_gatt_char(ACK_UUID, encode_u32(count), response=True)
 
 
 async def async_pull_records(

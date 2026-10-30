@@ -3,14 +3,19 @@
  *
  * Sync flow: HA connects, writes Time, reads Status, writes Request, receives
  * Records notifications, then gets a single 0xEE byte as the end marker. HA
- * writes Ack with the last minute it has stored and disconnects. Nothing is
- * acked unless HA says so, so a dropped link leaves every record in flash for
- * the next sync.
+ * writes Ack with the number of records it has stored and disconnects. Nothing
+ * is acked unless HA says so, so a dropped link leaves every record in flash
+ * for the next sync.
  *
- * The watch always streams every pending record, not only those from the
- * requested minute. Records that HA already stored are still acked, so they
- * leave the ring, and HA drops them by its own cursor. Filtering on the
- * watch would leave acked-but-unremoved records in the ring forever.
+ * Request takes a snapshot of the pending count. The watch streams exactly
+ * that many records, oldest first, even if more arrive during the transfer.
+ * Ack is a count, not a minute: uptime minutes restart at zero after a reboot,
+ * so a minute ack could release records that were never sent. Because the
+ * ring only removes from its tail, the first N records are the ones HA stored.
+ *
+ * Every pending record is sent, not only those from the requested minute.
+ * Records that HA already stored are still acked, so they leave the ring, and
+ * HA drops them by its own cursor.
  */
 #include <errno.h>
 #include <string.h>
@@ -82,14 +87,14 @@ static ssize_t write_time(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 static ssize_t write_ack(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			 const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
-	uint32_t minute;
+	uint32_t count;
 
-	if (offset != 0 || len != sizeof(minute)) {
+	if (offset != 0 || len != sizeof(count)) {
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
 	}
-	memcpy(&minute, buf, sizeof(minute));
+	memcpy(&count, buf, sizeof(count));
 	store_lock();
-	store_ack(minute);
+	store_ack(count);
 	store_unlock();
 	return len;
 }
@@ -148,6 +153,7 @@ static void stream_records(struct k_work *work)
 	uint16_t payload = bt_gatt_get_mtu(conn) - 3;
 	uint32_t batch_max = payload / sizeof(struct pd_record);
 	uint32_t index = 0;
+	uint32_t snapshot;
 	bool ok = true;
 
 	ARG_UNUSED(work);
@@ -157,17 +163,23 @@ static void stream_records(struct k_work *work)
 		batch_max = PD_MAX_BATCH;
 	}
 
-	while (ok) {
+	/* Fixed snapshot: records appended during the transfer wait for the next one. */
+	store_lock();
+	snapshot = store_pending();
+	store_unlock();
+
+	while (ok && index < snapshot) {
+		uint32_t want = snapshot - index;
 		int n;
 
-		store_lock();
-		n = store_read(index, batch, batch_max);
-		store_unlock();
-		if (n < 0) {
-			ok = false;
-			break;
+		if (want > batch_max) {
+			want = batch_max;
 		}
-		if (n == 0) {
+		store_lock();
+		n = store_read(index, batch, want);
+		store_unlock();
+		if (n <= 0) {
+			ok = false;
 			break;
 		}
 		index += n;

@@ -86,10 +86,20 @@ static void test_log_ring(void)
 	assert(pd_log_read(&log, 1, out, 4) == 4);
 	assert(out[0].minute == 101 && out[3].minute == 104);
 
-	pd_log_ack_upto(&log, 102);
+	/* Count-based ack releases the three oldest records. */
+	pd_log_ack_count(&log, 3);
 	assert(pd_log_pending(&log) == 2);
 	assert(pd_log_read(&log, 0, out, 4) == 2);
 	assert(out[0].minute == 103);
+
+	/* Acking more than is pending is clamped and leaves an empty ring. */
+	pd_log_ack_count(&log, 50);
+	assert(pd_log_pending(&log) == 0);
+
+	/* The ring still accepts appends after it has been emptied. */
+	in.minute = 200;
+	assert(pd_log_append(&log, &in) == 0);
+	assert(pd_log_read(&log, 0, out, 1) == 1 && out[0].minute == 200);
 }
 
 static void test_log_overflow_keeps_newest(void)

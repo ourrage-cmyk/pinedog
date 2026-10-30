@@ -95,9 +95,9 @@ int store_read(uint32_t index, struct pd_record *out, uint32_t max)
 	return pd_log_read(&log, index, out, max);
 }
 
-void store_ack(uint32_t minute)
+void store_ack(uint32_t count)
 {
-	pd_log_ack_upto(&log, minute);
+	pd_log_ack_count(&log, count);
 	checkpoint_locked();
 }
 

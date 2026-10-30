@@ -28,7 +28,7 @@ text, not as independent measurements.
 - **Others:** Garmin overwrites the oldest data when full. Oura holds 3 to 7 days and WHOOP 14. The data is removed only after the app has it.
 - **Us:** Ring log of 8-byte records. Records are removed only on an explicit ack by minute.
 - **Problem found:** the watch streamed only records after the requested minute. Records that the phone had already stored, and unsynced records from before the clock was set, were never sent, so never acked, so they stayed in the ring. A lost ack could leave them there indefinitely.
-- **Fix in this PR:** the watch streams every pending record. Home Assistant drops what is at or below its cursor. Unsynced records are persisted-and-dropped but still acked.
+- **Fix in this PR:** the watch streams every pending record. Home Assistant drops what is at or below its cursor. Unsynced records are persisted-and-dropped but still acked. Acks are counts, not minutes: uptime minutes restart at zero after a reboot, so a minute ack could release records that were never sent.
 - **Also found:** the Home Assistant side acked the watch before saving its own totals. A crash in between lost records permanently. The fix is to persist first, then ack.
 
 ### 2. Resumable and idempotent sync
@@ -100,15 +100,15 @@ text, not as independent measurements.
 ## Changes in this PR
 
 - `firmware/core/journal.c`, `journal.h`: checkpoint journal, replacing walk-forward recovery.
-- `firmware/core/ring_log.c`, `ring_log.h`: tail is moved and checkpointed before an erase. `pd_log_peek_slot` is removed.
+- `firmware/core/ring_log.c`, `ring_log.h`: tail is moved and checkpointed before an erase. `pd_log_ack_upto` (minute-based) is replaced by `pd_log_ack_count`. `pd_log_peek_slot` is removed.
 - `firmware/app/src/store.c`: uses the journal. The last two sectors are reserved for it.
-- `firmware/app/src/ble_sync.c`: streams every pending record and documents why.
+- `firmware/app/src/ble_sync.c`: Request takes a snapshot of the pending count and streams exactly that many records. Ack is a count.
 - `firmware/test/test_core.c`: journal and reboot tests.
-- `custom_components/pinedog/transfer.py`: the sync sequence, with persist before ack. No Bluetooth or Home Assistant imports.
+- `custom_components/pinedog/transfer.py`: the sync sequence, with persist before ack. Acks the number of records stored. No Bluetooth or Home Assistant imports.
 - `custom_components/pinedog/sync.py`: BLE adapter for the transfer.
 - `custom_components/pinedog/coordinator.py`: persists and dedupes by cursor, and uses the retry schedule.
 - `custom_components/pinedog/schedule.py`: connection attempt schedule.
-- `tests/ha/test_transfer.py`: order of persist and ack, failure paths, unsynced records, schedule.
+- `tests/ha/test_transfer.py`: order of persist and ack, failure paths, unsynced records, count acks after minutes go backwards, schedule.
 - `docs/DESIGN.md`: sync and checkpoint paragraphs updated.
 
 ## Next steps, in order

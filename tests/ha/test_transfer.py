@@ -83,7 +83,7 @@ def test_persists_before_acking_with_highest_minute():
     assert _run(link, persist) == 2
     names = [c[0] for c in link.calls]
     assert names.index("persist") < names.index("ack")
-    assert link.calls[-1] == ("ack", 101)
+    assert link.calls[-1] == ("ack", 2)
     assert [rec.minute for rec, _ in persisted] == [100, 101]
 
 
@@ -110,6 +110,18 @@ def test_no_ack_when_end_marker_never_arrives():
     assert ("unsubscribe",) in link.calls
 
 
+def test_ack_is_a_count_even_when_minutes_go_backwards():
+    # After a reboot, uptime minutes restart at zero. A minute ack would
+    # release the wrong records here. A count does not depend on minutes.
+    link = FakeLink(chunks=[_chunk((900, 1), (3, 1), (4, 1))])
+
+    async def persist(pairs):
+        pass
+
+    assert _run(link, persist) == 3
+    assert link.calls[-1] == ("ack", 3)
+
+
 def test_nothing_pending_skips_the_transfer():
     link = FakeLink(pending=0)
 
@@ -132,7 +144,7 @@ def test_unsynced_records_are_persisted_and_acked():
     assert _run(link, persist) == 1
     assert seen[0][0].minute == 7
     assert seen[0][1] is False  # not synced, so the coordinator drops it
-    assert link.calls[-1] == ("ack", 7)
+    assert link.calls[-1] == ("ack", 1)
 
 
 def test_schedule_gates_attempts():

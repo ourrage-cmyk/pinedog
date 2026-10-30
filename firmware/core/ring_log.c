@@ -91,21 +91,13 @@ int pd_log_read(struct pd_log *log, uint32_t idx, struct pd_record *out,
 	return (int)n;
 }
 
-void pd_log_ack_upto(struct pd_log *log, uint32_t minute)
+void pd_log_ack_count(struct pd_log *log, uint32_t n)
 {
-	struct pd_record rec;
-
-	while (log->count > 0) {
-		if (log->ops->read(log->ops->ctx, rec_addr(log, log->tail), &rec,
-				   PD_LOG_REC_SIZE)) {
-			return;
-		}
-		if (rec.minute > minute) {
-			return;
-		}
-		log->tail = (log->tail + 1) % log->capacity;
-		log->count--;
+	if (n > log->count) {
+		n = log->count;
 	}
+	log->tail = (log->tail + n) % log->capacity;
+	log->count -= n;
 }
 
 uint32_t pd_log_pending(const struct pd_log *log)
