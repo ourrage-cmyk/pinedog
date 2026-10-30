@@ -39,11 +39,14 @@ InfiniTime (see `docs/FIRMWARE.md`). Over-the-air updates over the stock
 InfiniTime bootloader are not used, because that needs signing keys we do not
 have.
 
-Sampling loop:
+Sampling loop (see `docs/ACTIVITY.md` for the reasoning):
 
-1. BMA421 runs at 25 Hz, ±4 g, in low-power mode with the FIFO enabled.
-2. The CPU wakes about once a second (FIFO watermark interrupt), drains the
-   samples, and goes back to sleep.
+1. BMA421 runs at 12.5 Hz in normal mode with the FIFO enabled, ±2 g. The
+   FIFO watermark is set to about 768 bytes, which is roughly 10 seconds of
+   data.
+2. The CPU wakes about 0.1 times a second (watermark interrupt), reads the
+   FIFO in one burst, and goes back to sleep. Once a minute it also reads the
+   on-chip step counter as an extra signal.
 3. For each sample it computes the vector magnitude minus 1 g (gravity), and
    accumulates per-minute:
    - **activity count**: sum of |magnitude − 1 g| (the same idea as the
@@ -69,7 +72,8 @@ Per-minute record (8 bytes):
 | class | uint8 | 0 rest, 1 light, 2 walk, 3 run |
 | cadence | uint8 | in 0.1 Hz units |
 
-That is 11.5 KB per day. The log is a ring buffer in SPI flash (4 KB sectors,
+That is 11.5 KB per day. Records are collected in RAM and flushed to flash
+every 10 minutes. The log is a ring buffer in SPI flash (4 KB sectors,
 erased one sector ahead of the write pointer), holding about a year before
 wrapping. Unsynced data is never lost unless the dog is out of range for a
 year.
@@ -136,14 +140,14 @@ time per day.
 | Consumer | Average current |
 |---|---|
 | nRF52832 sleep with RTC | ~3 µA |
-| BMA421 low-power 25 Hz | ~15 µA |
-| Waking once a second to drain FIFO | ~10 µA |
+| BMA421 normal mode 12.5 Hz, FIFO (BMA400 table, to confirm) | ~3 to 8 µA |
+| CPU wake about 0.1 times a second to drain FIFO | ~0.5 µA |
 | BLE advertising every 2 s | ~20 µA |
 | SPI flash in deep power-down, writes once per minute | ~3 µA |
 | Syncs (a few seconds per hour) | ~5 µA |
-| **Total** | **~55 µA** |
+| **Total** | **~40 µA** |
 
-180 mAh / 55 µA ≈ 130 days on paper. Real PineTimes leak more than the
+180 mAh / 40 µA ≈ 190 days on paper. Real PineTimes leak more than the
 datasheets suggest (regulator, display controller in sleep, board leakage), so
 the realistic target is **2 to 4 weeks**. We will measure with the battery
 voltage reported at every sync.
