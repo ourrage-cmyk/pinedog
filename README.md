@@ -19,6 +19,27 @@ The firmware image replaces InfiniTime on the watch. It has no clock face,
 no heart-rate sensor, and no over-the-air updates. Flashing it is one-way
 unless you keep a backup, so follow the backup step.
 
+## Install the Home Assistant integration with HACS
+
+The integration is not in the default HACS list. Add this repository as a
+custom repository:
+
+1. In Home Assistant, open **HACS** (Community Store).
+2. Open the menu (⋮) at the top right and choose **Custom repositories**.
+3. Paste `https://github.com/ourrage-cmyk/pinedog`, set the category to
+   **Integration**, and click **Add**.
+4. Search for **Pinedog** in HACS, open it, and click **Download**. Choose the
+   latest version (v0.2.1 or newer).
+5. Restart Home Assistant (Settings → System → Restart).
+6. Continue with [Step 6: pair the watch](#step-6-pair-the-watch). The watch
+   still has to be flashed first (Steps 1–4).
+
+HACS needs Home Assistant 2025.1 or later and the Bluetooth integration. Home
+Assistant also needs a working Bluetooth adapter; see the list below.
+
+Manual install, if HACS is not available: copy `custom_components/pinedog`
+into your Home Assistant `config/custom_components/` folder and restart.
+
 ## What you need
 
 | Item | Notes |
@@ -84,13 +105,12 @@ If you have no backup, use InfiniTime's own SWD guide
 
 ## Step 5: install the Home Assistant integration
 
-1. Copy the folder `custom_components/pinedog` from this repo into your Home
-   Assistant configuration folder, so you get
-   `config/custom_components/pinedog/`.
-2. Restart Home Assistant (Settings → System → Restart).
-3. Keep the watch in the same room as the Home Assistant Bluetooth adapter at first.
-   Within about a minute, Settings → Devices & services shows
-   **Pinedog collar found**.
+Use HACS (see [above](#install-the-home-assistant-integration-with-hacs)), or copy
+`custom_components/pinedog` into `config/custom_components/` by hand. Then restart
+Home Assistant (Settings → System → Restart).
+
+Keep the watch in the same room as the Home Assistant Bluetooth adapter at first.
+Within about a minute, Settings → Devices & services shows **Pinedog collar found**.
 
 ## Step 6: pair the watch
 
@@ -188,6 +208,18 @@ Everything below is still to be checked on a real watch:
   certainly too much. Measure for a week before trusting any figure.
 - The activity thresholds. They are guesses and need tuning on real data.
 
+## Releasing a version
+
+The version lives in `custom_components/pinedog/manifest.json`. HACS installs a
+GitHub release, so each version needs a tag with the same number:
+
+1. Set `version` in `manifest.json` (for example `0.2.2`).
+2. Merge to the default branch.
+3. Tag and push: `git tag v0.2.2 && git push origin v0.2.2`.
+
+`release.yml` checks that the tag matches the manifest and creates the release.
+`validate.yml` runs HACS and hassfest checks, plus the host tests, on every push.
+
 ## Repository layout
 
 | Path | Contents |
@@ -195,7 +227,9 @@ Everything below is still to be checked on a real watch:
 | `firmware/app/` | Zephyr application for the PineTime. |
 | `firmware/core/` | Pure C logic, tested on a computer. |
 | `firmware/release/` | Built image, ELF file, and checksums. |
-| `custom_components/pinedog/` | Home Assistant integration. |
+| `custom_components/pinedog/` | Home Assistant integration (installed by HACS). |
+| `hacs.json` | HACS metadata. |
+| `.github/workflows/` | Validation and release automation. |
 | `tests/ha/` | Python tests for the integration. |
 | `docs/DESIGN.md` | System design. |
 | `docs/FIRMWARE.md` | Firmware reference and known gaps. |
