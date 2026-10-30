@@ -10,50 +10,92 @@ built or measured on a PineTime, so the battery numbers are estimates.
 
 ## 1. Collect: BMA421 sampling
 
+### What the stock watch does
+
+InfiniTime's `Bma421::Process()` reads the sensor in a task that runs about
+10 times a second. It configures the accelerometer at 100 Hz, ±2 g, normal
+mode with averaging, and enables the on-chip step counter. It does not use the
+FIFO, the watermark or any interrupts. The step count comes from the sensor's
+own counter register, and the motion controller only consumes the values. So
+the stock watch gets about a week from polling the sensor 10 times a second
+while the rest of the system sleeps. Its power budget is dominated by the
+display, heart-rate and BLE, not the accelerometer.
+
 ### What the current firmware does
 
-`on_data_ready` runs once per sample, so the CPU wakes 25 times a second to read
-the sensor and update the summary. The design doc assumes the CPU wakes about
-once a second, draining the FIFO. The code does not do that yet. This is the
-largest battery problem in the current firmware, and it is already listed as a
-known gap in the PR.
+`on_data_ready` runs once per sample, so the CPU wakes 25 times a second to
+read the sensor and update the summary. The design doc describes a
+watermark wake about once a second, so the code and the design disagree. The
+PR already lists this as a known gap.
 
-### Recommended strategy
+### Sensor facts used here
 
-1. **Sample at 12.5 Hz instead of 25 Hz.** Dog gait (walk, trot, gallop) sits
-   around 1 to 4 Hz, and the vector-magnitude signal used for counts has
-   harmonics that stay mostly below 6 Hz. Half the samples per minute gives
-   nearly the same counts. This has to be checked on real logs (see below)
-   before it is adopted, and the BMA421 ODR options should be confirmed in its
-   datasheet.
-2. **Use the FIFO with a watermark.** Read the FIFO when it reaches a
-   watermark, so the CPU wakes every few seconds instead of every sample. At
-   12.5 Hz and 6 bytes per sample, a 1 KB FIFO (size to confirm in the
-   datasheet) fills in about 13 s, so the wake interval is limited to roughly
-   10 s. A full minute cannot be batched in the FIFO, so the per-minute
-   summary has to run across FIFO reads.
-3. **Keep a continuous sample stream, not duty cycling, for now.** Duty
-   cycling (for example 10 s on, 20 s off) would save more current but biases
-   the counts, because dog motion is bursty and the off-periods can miss
-   bouts. We should quantify that bias before adopting it.
-4. **Later option: any-motion interrupt as a gate.** While the sensor is in a
-   low-power wait state, an any-motion interrupt could wake the CPU. Minutes
-   with no interrupt would be recorded as rest with near-zero counts. This
-   saves the most current when the dog is lying still, but it needs the bias
-   measured first.
+The BMA421 datasheet was not retrieved in this session. The figures below come
+from the BMA400 datasheet, which is the same family, and must be checked
+against the BMA421 datasheet before the firmware is written:
 
-### Battery estimate (to measure)
+- FIFO: 1024 bytes, with a watermark interrupt when the unread count reaches
+  the watermark. (BMA400; confirm for BMA421.)
+- Normal mode ODR: 12.5 to 800 Hz. Low-power mode is fixed at 25 Hz.
+- Current (BMA400 table, depends on oversampling setting): normal mode 3.5 to
+  14.5 µA, low-power mode 0.85 to 1.35 µA.
+- Step counter: the whole device draws about 4 µA with it running.
+  Activity recognition and any-motion current are not given in that table.
 
-| Change | Expected effect |
-|---|---|
-| Per-sample interrupt to FIFO watermark (about 25 wakes/s to about 0.1/s) | Removes most of the CPU wake cost. Probably a few µA. |
-| 25 Hz to 12.5 Hz | Halves sensor conversions and FIFO bytes. Sensor current depends on the low-power mode, so the gain is uncertain. |
-| Any-motion gating | Largest saving for a dog that rests most of the time. Not yet quantified. |
+### Recommended scheme
+
+1. **Sample at 12.5 Hz in normal mode with the FIFO enabled.** Dog gait sits
+   around 1 to 4 Hz, so 12.5 Hz (Nyquist 6.25 Hz) keeps the counts. This
+   needs confirming on logs, which is listed below.
+2. **Set the FIFO watermark to about 768 bytes.** At 12.5 Hz with 6 bytes per
+   sample that is about 10 seconds of data per read. The CPU wakes about 0.1
+   times a second, reads the burst, and goes back to sleep. That replaces the
+   25 wakes a second in the current code.
+3. **Run the per-minute summary over the FIFO batches.** Each minute still
+   produces one record. Records are collected in RAM and flushed to the SPI
+   flash every 10 minutes, so the flash is powered about 6 times an hour.
+4. **Read the on-chip step counter once a minute as an extra signal.** It is
+   two register reads, and it costs almost nothing. It is tuned for human gait,
+   so on a dog it is a hint, not a count. Use it only if logs show it tracks
+   walking.
+5. **Hold off on duty cycling and any-motion gating.** Both save current when
+   the dog is still, but they change the counts and bias the baseline. Measure
+   first, and revisit only if the battery target is missed. Any gating must
+   still write one record for every minute. A minute without sensor
+   samples is written as REST with zero counts, and it is never skipped.
+   Skipping it would turn a quiet dog into a missing day.
+6. **Test low-power mode at 25 Hz.** Its current is lower than normal mode in
+   the BMA400 table. It is worth one comparison on logs: if the counts match
+   normal mode and the FIFO works in that mode, it is the cheaper option.
+
+### Battery estimate
+
+The accelerometer and its CPU wakes are a small part of the budget. The
+arithmetic:
+
+- 180 mAh over 1 week is about 1.07 mA average. Over 2 weeks it is about
+  0.54 mA. The design target of 2 to 4 weeks therefore allows an average of
+  roughly 0.2 to 0.5 mA, well above the 55 µA sum in `DESIGN.md`. The real
+  limits are board leakage and the radio, not the accelerometer.
+
+Estimates for this design (to be measured):
+
+| Consumer | Current now | Recommended | Notes |
+|---|---|---|---|
+| Sensor, normal mode 25 Hz | ~5 to 15 µA | ~3 to 8 µA at 12.5 Hz | BMA400 table, oversampling dependent |
+| CPU wakes (25/s, ~20 µs each) | ~2 µA | ~0.1 µA | Wake overhead, not the bus transfers |
+| Bus transfers and FIFO reads | ~ same | ~ same | Sample count halves, so this drops too |
+| Step counter, once a minute | - | <0.5 µA | Two register reads per minute |
+| Flash writes | once a minute | every 10 minutes | Fewer power-ups |
+
+The sensor bus transfers do not fall with batching, because each sample still
+needs reading. Batching mainly removes wake overhead. Halving the ODR is the
+bigger saving on the sensor side.
 
 Measure with a power profiler on a real PineTime (for example a Nordic PPK2),
-logging the average current for each firmware variant over at least one hour
-of typical dog activity. Confirm counts agree between 25 Hz and 12.5 Hz by
-logging both for one walk.
+logging average current for each variant over at least one hour of typical
+dog activity. Confirm counts agree between 25 Hz and 12.5 Hz, and between
+normal and low-power mode, by logging both for one walk.
 
 ## 2. Quantify: per-minute metrics
 
@@ -85,9 +127,25 @@ odd days, and gives a usable answer from the first week.
 
 ### How a day is measured
 
-For each day, the integration takes the minutes that were recorded (active and
-sedentary minutes, so watch-off time is excluded) and scales them to a full
-day:
+### Wear rules
+
+The rules are fixed so that stillness never reads as non-wear:
+
+- **Quiet is sedentary.** A minute below the rest threshold is class REST,
+  counted as sedentary time. A dog asleep all day is 1440 sedentary minutes,
+  not a day the watch was off. The rest threshold (`rest_max` in the
+  firmware) is the tunable line between quiet and light.
+- **Charging is the only not-worn time.** While the watch is on its charger,
+  every minute is written as class 4 (NOT_WORN). Those minutes are left out of
+  all totals and out of the wear count.
+- **A missing record is data loss.** A minute with no record is not rest and
+  not wear. It is not in the totals, and days are scaled by the minutes that
+  were recorded. Gaps should be rare, since the firmware writes every minute.
+
+### How a day is measured
+
+For each day, the integration takes the minutes that were recorded as active or
+sedentary (charging minutes excluded) and scales them to a full day:
 
     full_day_counts = motion_counts × 1440 / worn_minutes
 
@@ -134,7 +192,7 @@ with too little wear being ignored; outlier days (very high and zero) not
 moving the baseline; missing days; the 60-day window; the weekday effect; and
 the waiting status.
 
-A synthetic run (91 days, 15% missing days, random watch-off, Saturday walks
+A synthetic run (91 days, 15% missing days, random wear and charging gaps, Saturday walks
 at 1.6× the usual level, and a two-day illness) gave a status of `normal`
 from day 14 onward, and `percent` between 99 and 101 on the weekdays checked.
 On Saturdays the percent read 136 to 149 because the weekday effect was only
