@@ -15,9 +15,10 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # Optional GitHub settings (description, topics) and brand assets are not
-          # needed for a personal custom repository. Skip them so the check passes.
-          ignore: "brands description topics"
+          # Optional for a personal custom repository: GitHub description, topics,
+          # brand assets. License is also skipped: HACS reads it from the default
+          # branch, so it cannot see LICENSE until this branch is merged.
+          ignore: "brands description topics license"
 
   hassfest:
     name: Hassfest validation
