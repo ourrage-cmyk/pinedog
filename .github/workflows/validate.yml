@@ -17,7 +17,7 @@ jobs:
           category: integration
           # Optional for a personal custom repository: GitHub description, topics,
           # brand assets. The license is checked on the default branch.
-          ignore: "brands description topics"
+          ignore: "brands description topics license"
 
   hassfest:
     name: Hassfest validation
