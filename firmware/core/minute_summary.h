@@ -12,13 +12,20 @@ enum pd_class {
 	PD_CLASS_RUN = 3,
 };
 
-/* One stored record. Packed to 8 bytes on flash. */
+/*
+ * One stored record. Packed to 8 bytes on flash. The last byte is a CRC-8
+ * over the first seven, so a corrupted record is detected on read. Cadence is
+ * used on the watch only, to pick the class, and is not stored.
+ */
 struct pd_record {
-	uint32_t minute;   /* minutes since Unix epoch */
+	uint32_t minute;   /* minutes since Unix epoch, or uptime if unsynced */
 	uint16_t counts;   /* saturating activity count */
-	uint8_t class;     /* enum pd_class */
-	uint8_t cadence;   /* steps per second * 10, 0 if not rhythmic */
+	uint8_t class;     /* class byte, see store.h */
+	uint8_t crc;       /* CRC-8 of the other seven bytes */
 } __attribute__((packed));
+
+/* CRC-8 (poly 0x07, init 0) over the first seven bytes of a record. */
+uint8_t pd_record_crc(const struct pd_record *rec);
 
 /* Thresholds, tunable from Home Assistant via the Config characteristic. */
 struct pd_config {

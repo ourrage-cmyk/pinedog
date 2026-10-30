@@ -2,20 +2,32 @@
  * Pinedog firmware for the first-generation PineTime.
  *
  * The BMA421 raises a data-ready interrupt at 25 Hz. Each sample feeds the
- * per-minute summariser, and a finished minute is stored in the flash log.
- * Home Assistant pulls the log over BLE when the dog comes home.
+ * per-minute summariser, and a finished minute is stored in the external flash
+ * log with a checksum. Home Assistant pulls the log over an encrypted,
+ * bonded Bluetooth link, and the button opens a pairing window.
+ *
+ * There is no real-time clock. Records logged before the first clock sync
+ * after a boot carry uptime minutes and a boot id, so Home Assistant can place
+ * them in time once it has synced.
  */
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
+#include "battery.h"
 #include "ble_sync.h"
 #include "clock.h"
 #include "minute_summary.h"
+#include "pairing.h"
 #include "store.h"
+#include "watchdog.h"
+
+LOG_MODULE_REGISTER(pinedog, LOG_LEVEL_INF);
 
 #define ACCEL_NODE DT_NODELABEL(bma421)
+#define STATUS_PERIOD K_MINUTES(10)
 
 /*
  * Thresholds are starting points, not calibrated. The counts are mg of
@@ -30,6 +42,7 @@ static const struct pd_config cfg = {
 };
 
 static struct pd_summary summary;
+static struct k_work_delayable status_log;
 
 /* Converts a sensor value in m/s^2 to milli-g. */
 static int32_t to_mg(const struct sensor_value *v)
@@ -59,15 +72,33 @@ static void on_data_ready(const struct device *dev,
 	}
 
 	/* The record is for the minute that just ended. */
-	rec.minute = clock_minute() - 1;
-	if (!clock_synced()) {
-		rec.class |= PD_CLASS_UNSYNCED;
+	uint32_t minute = clock_minute();
+
+	rec.minute = minute > 0 ? minute - 1 : 0;
+	if (clock_synced()) {
+		rec.class &= PD_CLASS_MASK;
+	} else {
+		/* Keep the boot id so Home Assistant can place the record later. */
+		rec.class = (rec.class & PD_CLASS_MASK) | PD_CLASS_UNSYNCED |
+			    ((store_boot_id() & PD_BOOT_MASK) << PD_BOOT_SHIFT);
 	}
 	store_lock();
-	if (store_append(&rec)) {
-		printk("log append failed\n");
-	}
+	store_append(&rec);
 	store_unlock();
+}
+
+static void log_status(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	store_lock();
+	uint32_t pending = store_pending();
+	store_unlock();
+
+	LOG_INF("status: uptime %u s, boot %u, clock %s, pending %u, battery %u%%%s",
+		(uint32_t)(k_uptime_get() / 1000), store_boot_id(),
+		clock_synced() ? "synced" : "unsynced", pending, battery_percent(),
+		battery_charging() ? ", charging" : "");
+	k_work_reschedule(&status_log, STATUS_PERIOD);
 }
 
 int main(void)
@@ -81,14 +112,25 @@ int main(void)
 	};
 	int rc;
 
+	watchdog_log_reset_cause();
+	rc = watchdog_start();
+	if (rc) {
+		LOG_ERR("watchdog not armed: %d", rc);
+	}
+
 	rc = store_init();
 	if (rc) {
-		printk("store init failed: %d\n", rc);
+		LOG_ERR("store init failed: %d", rc);
 		return rc;
 	}
 
+	rc = battery_init();
+	if (rc) {
+		LOG_ERR("battery init failed: %d", rc);
+	}
+
 	if (!device_is_ready(accel)) {
-		printk("accelerometer not ready\n");
+		LOG_ERR("accelerometer not ready");
 		return -ENODEV;
 	}
 	sensor_attr_set(accel, SENSOR_CHAN_ACCEL_XYZ,
@@ -97,18 +139,26 @@ int main(void)
 			SENSOR_ATTR_FULL_SCALE, &range);
 	rc = sensor_trigger_set(accel, &trig, on_data_ready);
 	if (rc) {
-		printk("trigger set failed: %d\n", rc);
+		LOG_ERR("trigger set failed: %d", rc);
 		return rc;
 	}
 
 	rc = bt_enable(NULL);
 	if (rc) {
-		printk("bt_enable failed: %d\n", rc);
+		LOG_ERR("bt_enable failed: %d", rc);
+		return rc;
+	}
+	rc = pairing_init();
+	if (rc) {
+		LOG_ERR("pairing init failed: %d", rc);
 		return rc;
 	}
 	ble_sync_init();
 
 	pd_summary_reset(&summary, clock_minute());
-	printk("pinedog started, %u records pending\n", store_pending());
+	k_work_init_delayable(&status_log, log_status);
+	k_work_reschedule(&status_log, K_SECONDS(30));
+	LOG_INF("pinedog started, boot %u, %u records pending",
+		store_boot_id(), store_pending());
 	return 0;
 }

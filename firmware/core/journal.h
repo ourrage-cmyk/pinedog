@@ -33,13 +33,20 @@ struct pd_journal {
 };
 
 /*
+ * Each entry also stores the boot counter (mod 256). The newest valid entry
+ * gives the boot counter of the last run, so the next run is one higher.
+ */
+
+/*
  * Finds the newest valid checkpoint. Sets *found and, when found, *head and
  * *count. A blank or damaged journal is erased so writing can start.
  */
 int pd_journal_open(struct pd_journal *j, const struct pd_flash_ops *ops,
-		    uint32_t base, bool *found, uint32_t *head, uint32_t *count);
+		    uint32_t base, bool *found, uint32_t *head, uint32_t *count,
+		    uint8_t *boot);
 
 /* Programs one checkpoint. Erases the other sector first when this one is full. */
-int pd_journal_write(struct pd_journal *j, uint32_t head, uint32_t count);
+int pd_journal_write(struct pd_journal *j, uint32_t head, uint32_t count,
+		    uint8_t boot);
 
 #endif

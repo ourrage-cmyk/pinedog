@@ -1,0 +1,28 @@
+/*
+ * Storage layout on the external 4 MB SPI NOR (XT25F32B), 1 MB partition.
+ *
+ *   0x300000  storage        log ring, plus one checkpoint sector at the end
+ *   0x3F8000  settings       Bluetooth bonds and settings (NVS), 32 KB
+ *
+ * The stock board file gives "storage" the whole 1 MB. Shrinking it makes room
+ * for bonds, which must survive a flat battery.
+ */
+
+/ {
+	chosen {
+		zephyr,settings-partition = &settings_partition;
+	};
+};
+
+&storage_partition {
+	reg = <0x00300000 0x000f8000>;
+};
+
+&xt25fb32 {
+	partitions {
+		settings_partition: partition@3f8000 {
+			label = "settings";
+			reg = <0x003f8000 0x00008000>;
+		};
+	};
+};

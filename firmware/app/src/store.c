@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <string.h>
 
 #include <zephyr/kernel.h>
@@ -11,6 +12,7 @@
 static const struct flash_area *fa;
 static struct pd_log log;
 static struct pd_journal journal;
+static uint8_t boot_id;
 static K_MUTEX_DEFINE(store_mutex);
 
 static int fa_read(void *ctx, uint32_t addr, void *buf, size_t len)
@@ -43,6 +45,7 @@ int store_init(void)
 {
 	uint32_t ring_size;
 	uint32_t head = 0, count = 0;
+	uint8_t boot = 0;
 	bool found;
 	int rc;
 
@@ -57,19 +60,26 @@ int store_init(void)
 	if (rc) {
 		return rc;
 	}
-	rc = pd_journal_open(&journal, &ops, ring_size, &found, &head, &count);
+	rc = pd_journal_open(&journal, &ops, ring_size, &found, &head, &count, &boot);
 	if (rc) {
 		return rc;
 	}
 	if (found) {
 		pd_log_restore(&log, head, count);
 	}
-	return 0;
+	/* Each boot takes the next id, so unsynced records can be placed in time later. */
+	boot_id = (boot + 1) & PD_BOOT_MASK;
+	return pd_journal_write(&journal, log.head, log.count, boot_id) ? -EIO : 0;
+}
+
+uint8_t store_boot_id(void)
+{
+	return boot_id;
 }
 
 static void checkpoint_locked(void)
 {
-	if (pd_journal_write(&journal, log.head, log.count)) {
+	if (pd_journal_write(&journal, log.head, log.count, boot_id)) {
 		printk("checkpoint write failed\n");
 	}
 }

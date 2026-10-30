@@ -75,8 +75,10 @@ bool pd_summary_push(struct pd_summary *s, int32_t x_mg, int32_t y_mg,
 
 		out->minute = s->minute;
 		out->counts = (uint16_t)(counts > 65535 ? 65535 : counts);
-		out->cadence = (uint8_t)(cycles_per_s_x10 > 255 ? 255 : cycles_per_s_x10);
-		out->class = pd_classify(out->counts, out->cadence, cfg);
+		out->class = pd_classify(out->counts,
+					 (uint8_t)(cycles_per_s_x10 > 255 ? 255 : cycles_per_s_x10),
+					 cfg);
+		out->crc = 0;
 		done = true;
 		pd_summary_reset(s, s->minute + 1);
 	}
@@ -96,4 +98,18 @@ uint8_t pd_classify(uint16_t counts, uint8_t cadence,
 		return PD_CLASS_WALK;
 	}
 	return PD_CLASS_LIGHT;
+}
+
+uint8_t pd_record_crc(const struct pd_record *rec)
+{
+	const uint8_t *p = (const uint8_t *)rec;
+	uint8_t crc = 0;
+
+	for (int i = 0; i < 7; i++) {
+		crc ^= p[i];
+		for (int b = 0; b < 8; b++) {
+			crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x07) : (uint8_t)(crc << 1);
+		}
+	}
+	return crc;
 }

@@ -8,25 +8,28 @@ struct pd_ckpt {
 	uint32_t seq;
 	uint32_t head;
 	uint32_t count;
-	uint32_t crc; /* over seq, head and count */
+	uint8_t boot;
+	uint8_t pad;
+	uint16_t crc; /* CRC-16/CCITT over seq, head, count, boot and pad */
 };
 
 _Static_assert(sizeof(struct pd_ckpt) == PD_JOURNAL_ENTRY_SIZE,
 	       "checkpoint entry must be 16 bytes");
 
-/* Bitwise CRC-32 (IEEE). Only a few dozen bytes per call, so speed does not matter. */
-static uint32_t crc32(const void *data, size_t len)
+/* Bitwise CRC-16/CCITT-FALSE. Only a few dozen bytes per call, so speed does not matter. */
+static uint16_t crc16(const void *data, size_t len)
 {
 	const uint8_t *p = data;
-	uint32_t crc = 0xFFFFFFFFu;
+	uint16_t crc = 0xFFFF;
 
 	for (size_t i = 0; i < len; i++) {
-		crc ^= p[i];
+		crc ^= (uint16_t)p[i] << 8;
 		for (int b = 0; b < 8; b++) {
-			crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+			crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021)
+					     : (uint16_t)(crc << 1);
 		}
 	}
-	return ~crc;
+	return crc;
 }
 
 static uint32_t entry_addr(const struct pd_journal *j, uint32_t sector,
@@ -50,7 +53,7 @@ static bool entry_valid(const struct pd_ckpt *e)
 	if (e->seq == 0 || e->seq == 0xFFFFFFFFu) {
 		return false;
 	}
-	return e->crc == crc32(e, offsetof(struct pd_ckpt, crc));
+	return e->crc == crc16(e, offsetof(struct pd_ckpt, crc));
 }
 
 static int erase_sector(const struct pd_journal *j, uint32_t sector)
@@ -60,7 +63,8 @@ static int erase_sector(const struct pd_journal *j, uint32_t sector)
 }
 
 int pd_journal_open(struct pd_journal *j, const struct pd_flash_ops *ops,
-		    uint32_t base, bool *found, uint32_t *head, uint32_t *count)
+		    uint32_t base, bool *found, uint32_t *head, uint32_t *count,
+		    uint8_t *boot)
 {
 	struct pd_ckpt best = { 0 };
 	bool have_best = false;
@@ -75,6 +79,7 @@ int pd_journal_open(struct pd_journal *j, const struct pd_flash_ops *ops,
 	*found = false;
 	*head = 0;
 	*count = 0;
+	*boot = 0;
 
 	for (uint32_t s = 0; s < PD_JOURNAL_SECTORS; s++) {
 		for (uint32_t i = 0; i < PD_JOURNAL_ENTRIES_PER_SECTOR; i++) {
@@ -112,18 +117,21 @@ int pd_journal_open(struct pd_journal *j, const struct pd_flash_ops *ops,
 	*found = true;
 	*head = best.head;
 	*count = best.count;
+	*boot = best.boot;
 	j->seq = best.seq;
 	j->active = best_sector;
 	j->next = used[best_sector];
 	return 0;
 }
 
-int pd_journal_write(struct pd_journal *j, uint32_t head, uint32_t count)
+int pd_journal_write(struct pd_journal *j, uint32_t head, uint32_t count,
+		    uint8_t boot)
 {
 	struct pd_ckpt e = {
 		.seq = j->seq + 1,
 		.head = head,
 		.count = count,
+		.boot = boot,
 	};
 	int rc;
 
@@ -139,7 +147,7 @@ int pd_journal_write(struct pd_journal *j, uint32_t head, uint32_t count)
 		j->next = 0;
 	}
 
-	e.crc = crc32(&e, offsetof(struct pd_ckpt, crc));
+	e.crc = crc16(&e, offsetof(struct pd_ckpt, crc));
 	/* Advance even on failure: a torn entry must never be programmed over. */
 	j->seq = e.seq;
 	rc = j->ops->program(j->ops->ctx, entry_addr(j, j->active, j->next), &e,

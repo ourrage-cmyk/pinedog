@@ -7,6 +7,9 @@ target_sources(app PRIVATE
   src/store.c
   src/ble_sync.c
   src/clock.c
+  src/battery.c
+  src/pairing.c
+  src/watchdog.c
   ../core/minute_summary.c
   ../core/ring_log.c
   ../core/journal.c
