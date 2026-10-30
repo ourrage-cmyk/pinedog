@@ -7,10 +7,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
 from .coordinator import PinedogCoordinator
+from .entity import PinedogEntity
 
 BASELINE_OPTIONS = ["learning", "below", "normal", "above"]
 
@@ -27,26 +26,14 @@ async def async_setup_entry(
             PinedogMotionSensor(coordinator, entry),
             PinedogBaselineSensor(coordinator, entry),
             PinedogLastSyncSensor(coordinator, entry),
+            PinedogBatterySensor(coordinator, entry),
+            PinedogPendingSensor(coordinator, entry),
+            PinedogLastErrorSensor(coordinator, entry),
         ]
     )
 
 
-class _Base(CoordinatorEntity[PinedogCoordinator], SensorEntity):
-    _attr_has_entity_name = True
-
-    def __init__(self, coordinator: PinedogCoordinator, entry: ConfigEntry, key: str, name: str) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_name = name
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.data["address"])},
-            "name": "Pinedog collar",
-            "manufacturer": "Pine64",
-            "model": "PineTime (dog firmware)",
-        }
-
-
-class PinedogMinutesSensor(_Base):
+class PinedogMinutesSensor(PinedogEntity, SensorEntity):
     _attr_native_unit_of_measurement = "min"
     _attr_state_class = SensorStateClass.TOTAL
 
@@ -63,7 +50,7 @@ class PinedogMinutesSensor(_Base):
         return getattr(today, self._field)
 
 
-class PinedogMotionSensor(_Base):
+class PinedogMotionSensor(PinedogEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL
     _attr_icon = "mdi:run"
 
@@ -76,7 +63,7 @@ class PinedogMotionSensor(_Base):
         return today.motion_counts if today else 0
 
 
-class PinedogBaselineSensor(_Base):
+class PinedogBaselineSensor(PinedogEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = BASELINE_OPTIONS
     _attr_icon = "mdi:chart-line"
@@ -89,7 +76,7 @@ class PinedogBaselineSensor(_Base):
         return self.coordinator.data.baseline
 
 
-class PinedogLastSyncSensor(_Base):
+class PinedogLastSyncSensor(PinedogEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -99,3 +86,44 @@ class PinedogLastSyncSensor(_Base):
     @property
     def native_value(self):
         return self.coordinator.data.last_sync
+
+
+class PinedogBatterySensor(PinedogEntity, SensorEntity):
+    """Charge level, shown as a reminder to put the collar on the charger."""
+
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "battery", "Battery")
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator.data.battery_pct
+
+
+class PinedogPendingSensor(PinedogEntity, SensorEntity):
+    """Records the watch still holds that Home Assistant has not stored yet."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:database-clock"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "pending", "Unsynced records")
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.data.pending
+
+
+class PinedogLastErrorSensor(PinedogEntity, SensorEntity):
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:bluetooth-off"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "last_error", "Last sync error")
+
+    @property
+    def native_value(self) -> str | None:
+        return self.coordinator.data.last_error

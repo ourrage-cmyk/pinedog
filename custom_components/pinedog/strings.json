@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "bluetooth_confirm": {
+        "title": "Pinedog collar found",
+        "description": "Set up {name}? Its activity records will sync whenever the collar is in range."
+      },
+      "pair": {
+        "title": "Pair the collar",
+        "description": "Press the button on the watch once. Pairing is open for 60 seconds. Then submit this form to bond with it."
+      }
+    },
+    "error": {
+      "pair_failed": "Pairing failed. Press the watch button again and submit within 60 seconds."
+    },
+    "abort": {
+      "already_configured": "This collar is already set up."
+    }
+  }
+}

@@ -82,6 +82,8 @@ static void on_data_ready(const struct device *dev,
 		rec.class = (rec.class & PD_CLASS_MASK) | PD_CLASS_UNSYNCED |
 			    ((store_boot_id() & PD_BOOT_MASK) << PD_BOOT_SHIFT);
 	}
+	/* Last field of the record: CRC-8 over the other seven bytes. */
+	rec.crc = pd_record_crc(&rec);
 	store_lock();
 	store_append(&rec);
 	store_unlock();

@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
-RECORD_FORMAT = "<IHBB"  # minute, counts, class, cadence (8 bytes, packed)
+RECORD_FORMAT = "<IHBB"  # minute, counts, class, crc8 (8 bytes, packed, see protocol.py)
 RECORD_SIZE = struct.calcsize(RECORD_FORMAT)
 
 REST, LIGHT, WALK, RUN = 0, 1, 2, 3
@@ -24,8 +24,7 @@ BASELINE_DAYS = 7
 class Record:
     minute: int  # minutes since Unix epoch
     counts: int
-    activity_class: int
-    cadence: int  # steps/s * 10
+    activity_class: int  # REST, LIGHT, WALK or RUN, unsynced bits already removed
 
 
 @dataclass(frozen=True)
@@ -37,15 +36,14 @@ class DailyTotals:
     motion_counts: int
 
 
-def decode_records(payload: bytes) -> list[Record]:
-    """Decode a notification payload of packed 8-byte records."""
+def unpack_raw(payload: bytes) -> list[tuple[int, int, int, int]]:
+    """Split a payload of packed 8-byte records into (minute, counts, class byte, crc)."""
     if len(payload) % RECORD_SIZE:
         raise ValueError(f"payload length {len(payload)} is not a multiple of {RECORD_SIZE}")
-    out = []
-    for offset in range(0, len(payload), RECORD_SIZE):
-        minute, counts, cls, cadence = struct.unpack_from(RECORD_FORMAT, payload, offset)
-        out.append(Record(minute, counts, cls, cadence))
-    return out
+    return [
+        struct.unpack_from(RECORD_FORMAT, payload, offset)
+        for offset in range(0, len(payload), RECORD_SIZE)
+    ]
 
 
 def _day_of(minute: int, tz: timezone) -> date:

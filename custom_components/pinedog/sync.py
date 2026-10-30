@@ -10,7 +10,7 @@ from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 
 from .protocol import ACK_UUID, RECORDS_UUID, REQUEST_UUID, STATUS_UUID, TIME_UUID, encode_u32
-from .transfer import PersistFn, run_transfer
+from .transfer import PersistFn, TransferResult, run_transfer
 
 
 class BleakLink:
@@ -36,23 +36,36 @@ class BleakLink:
         if self._client.is_connected:
             await self._client.stop_notify(RECORDS_UUID)
 
-    async def request(self, from_minute: int) -> None:
-        await self._client.write_gatt_char(REQUEST_UUID, encode_u32(from_minute), response=True)
+    async def request(self) -> None:
+        # The watch ignores the payload and streams every pending record.
+        await self._client.write_gatt_char(REQUEST_UUID, encode_u32(0), response=True)
 
     async def write_ack(self, count: int) -> None:
         await self._client.write_gatt_char(ACK_UUID, encode_u32(count), response=True)
 
 
-async def async_pull_records(
-    hass: HomeAssistant, address: str, from_minute: int, persist: PersistFn
-) -> int:
-    """Connect, run one transfer, and disconnect. Returns the record count."""
+def _device(hass: HomeAssistant, address: str):
     device = bluetooth.async_ble_device_from_address(hass, address, connectable=True)
     if device is None:
         raise ConnectionError(f"{address} is not in range")
+    return device
 
-    client = await establish_connection(BleakClient, device, "Pinedog", max_attempts=3)
+
+async def async_pull_records(
+    hass: HomeAssistant, address: str, persist: PersistFn
+) -> TransferResult:
+    """Connect, run one transfer, and disconnect."""
+    client = await establish_connection(BleakClient, _device(hass, address), "Pinedog", max_attempts=3)
     try:
-        return await run_transfer(BleakLink(client), from_minute, int(time.time()), persist)
+        return await run_transfer(BleakLink(client), int(time.time()), persist)
+    finally:
+        await client.disconnect()
+
+
+async def async_pair(hass: HomeAssistant, address: str) -> None:
+    """Bond with the watch. The watch only accepts pairing while its button window is open."""
+    client = await establish_connection(BleakClient, _device(hass, address), "Pinedog", max_attempts=3)
+    try:
+        await client.pair()
     finally:
         await client.disconnect()

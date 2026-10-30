@@ -12,15 +12,16 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .activity import DailyTotals, baseline_status, daily_totals
+from .activity import DailyTotals, Record, baseline_status, daily_totals
 from .schedule import should_attempt
 from .sync import async_pull_records
-from .transfer import Pairs
+from .transfer import TransferResult
 
 _LOGGER = logging.getLogger(__name__)
 
 STORE_VERSION = 1
 KEEP_DAYS = 60
+LOW_BATTERY_PCT = 20
 
 
 @dataclass
@@ -29,12 +30,23 @@ class PinedogData:
     baseline: str = "learning"
     last_sync: datetime | None = None
     last_error: str | None = None
-    dropped_unsynced: int = 0
+    battery_pct: int | None = None
+    charging: bool = False
+    power_present: bool = False
+    pending: int = 0
+    dropped_corrupt: int = 0
+    dropped_unplaced: int = 0
+
+    @property
+    def low_battery(self) -> bool:
+        return self.battery_pct is not None and self.battery_pct <= LOW_BATTERY_PCT and not self.charging
 
 
 @dataclass
 class _State:
-    last_acked_minute: int = -1
+    # Unix minute of the newest record stored. Records at or below it were
+    # counted already, so a resend after a lost ack is not double counted.
+    last_stored_minute: int = -1
     days: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
@@ -47,12 +59,17 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         self._last_sync: datetime | None = None
         self._last_attempt: datetime | None = None
         self._last_error: str | None = None
-        self._dropped = 0
+        self._battery_pct: int | None = None
+        self._charging = False
+        self._power_present = False
+        self._pending = 0
+        self._dropped_corrupt = 0
+        self._dropped_unplaced = 0
 
     async def async_load(self) -> None:
         raw = await self._store.async_load() or {}
         self._state = _State(
-            last_acked_minute=raw.get("last_acked_minute", -1),
+            last_stored_minute=raw.get("last_stored_minute", -1),
             days=raw.get("days", {}),
         )
         last = raw.get("last_sync")
@@ -61,18 +78,16 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         self.data = self._build()
 
     def _history(self) -> list[DailyTotals]:
-        out = []
-        for key, v in sorted(self._state.days.items()):
-            out.append(
-                DailyTotals(
-                    date.fromisoformat(key),
-                    v["active"],
-                    v["sedentary"],
-                    v["walking"],
-                    v["motion"],
-                )
+        return [
+            DailyTotals(
+                date.fromisoformat(key),
+                v["active"],
+                v["sedentary"],
+                v["walking"],
+                v["motion"],
             )
-        return out
+            for key, v in sorted(self._state.days.items())
+        ]
 
     def _build(self) -> PinedogData:
         history = self._history()
@@ -86,7 +101,12 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             baseline=base,
             last_sync=self._last_sync,
             last_error=self._last_error,
-            dropped_unsynced=self._dropped,
+            battery_pct=self._battery_pct,
+            charging=self._charging,
+            power_present=self._power_present,
+            pending=self._pending,
+            dropped_corrupt=self._dropped_corrupt,
+            dropped_unplaced=self._dropped_unplaced,
         )
 
     async def _async_update_data(self) -> PinedogData:
@@ -97,8 +117,8 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             await self._sync()
             self._last_error = None
         except Exception as err:  # noqa: BLE001 - keep sensors alive on any BLE error
-            self._last_error = str(err)
-            _LOGGER.debug("Pinedog sync failed: %s", err)
+            self._last_error = str(err) or type(err).__name__
+            _LOGGER.warning("Pinedog sync failed, will retry: %s", self._last_error)
         return self._build()
 
     def _attempt_allowed(self) -> bool:
@@ -107,22 +127,35 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         )
 
     async def _sync(self) -> None:
-        await async_pull_records(
-            self.hass, self.address, self._state.last_acked_minute + 1, self._persist
-        )
+        result = await async_pull_records(self.hass, self.address, self._persist)
+        self._apply_result(result)
 
-    async def _persist(self, pairs: Pairs) -> None:
+    def _apply_result(self, result: TransferResult) -> None:
+        if result.status is not None:
+            st = result.status
+            self._battery_pct = st.battery_pct
+            self._charging = st.charging
+            self._power_present = st.power_present
+            # Records the watch added after our status read stay pending for the next sync.
+            self._pending = max(st.pending - result.received, 0)
+        self._dropped_corrupt += result.corrupt
+        self._dropped_unplaced += result.unplaced
+        if result.corrupt or result.unplaced:
+            _LOGGER.warning(
+                "Pinedog sync dropped %d corrupt and %d unplaceable records",
+                result.corrupt,
+                result.unplaced,
+            )
+
+    async def _persist(self, records: list[Record]) -> None:
         """Store records before the watch is acked. Runs once per transfer.
 
-        The watch may resend records we already counted, for example when an
-        ack was lost. The cursor drops those, so totals are never double counted.
+        Called with the records already placed in unix time and CRC-checked.
         """
-        cursor = self._state.last_acked_minute
-        fresh = [(rec, ok) for rec, ok in pairs if rec.minute > cursor]
-        synced = [rec for rec, ok in fresh if ok]
-        self._dropped += len(fresh) - len(synced)
+        cursor = self._state.last_stored_minute
+        fresh = [rec for rec in records if rec.minute > cursor]
         tz = dt_util.get_default_time_zone()
-        for day, totals in daily_totals(synced, tz).items():
+        for day, totals in daily_totals(fresh, tz).items():
             cur = self._state.days.setdefault(
                 day.isoformat(),
                 {"active": 0, "sedentary": 0, "walking": 0, "motion": 0},
@@ -133,11 +166,12 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             cur["motion"] += totals.motion_counts
         for key in sorted(self._state.days)[:-KEEP_DAYS]:
             del self._state.days[key]
-        self._state.last_acked_minute = max(cursor, max(rec.minute for rec, _ in pairs))
+        if records:
+            self._state.last_stored_minute = max(cursor, max(rec.minute for rec in records))
         self._last_sync = dt_util.utcnow()
         await self._store.async_save(
             {
-                "last_acked_minute": self._state.last_acked_minute,
+                "last_stored_minute": self._state.last_stored_minute,
                 "days": self._state.days,
                 "last_sync": self._last_sync.isoformat(),
             }

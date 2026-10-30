@@ -1,13 +1,17 @@
-"""Discovers a Pinedog watch through Home Assistant's Bluetooth stack."""
+"""Discovers a Pinedog watch through Home Assistant's Bluetooth stack and bonds with it."""
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 
 from .const import DOMAIN
+from .sync import async_pair
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -30,12 +34,33 @@ class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         assert self._discovered is not None
         if user_input is not None:
-            return self.async_create_entry(
-                title=self._discovered.name or "Pinedog",
-                data={"address": self._discovered.address},
-            )
+            return await self.async_step_pair()
         self._set_confirm_only()
         return self.async_show_form(
             step_id="bluetooth_confirm",
+            description_placeholders={"name": self._discovered.name or "Pinedog"},
+        )
+
+    async def async_step_pair(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Bond with the watch. Its button opens a 60 second pairing window."""
+        assert self._discovered is not None
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                await async_pair(self.hass, self._discovered.address)
+            except Exception as err:  # noqa: BLE001 - any failure means the user retries
+                _LOGGER.warning("Pinedog pairing failed: %s", err)
+                errors["base"] = "pair_failed"
+            else:
+                return self.async_create_entry(
+                    title=self._discovered.name or "Pinedog",
+                    data={"address": self._discovered.address},
+                )
+        return self.async_show_form(
+            step_id="pair",
+            data_schema=None,
+            errors=errors,
             description_placeholders={"name": self._discovered.name or "Pinedog"},
         )

@@ -13,21 +13,27 @@ _pkg = types.ModuleType("pinedog")
 _pkg.__path__ = [str(PKG_DIR)]
 sys.modules["pinedog"] = _pkg
 
-from pinedog.protocol import CLASS_UNSYNCED_FLAG, END_MARKER  # noqa: E402
+from pinedog.protocol import END_MARKER, UNSYNCED_FLAG, BOOT_SHIFT, crc8  # noqa: E402
 from pinedog.schedule import RETRY_INTERVAL, SUCCESS_INTERVAL, should_attempt  # noqa: E402
-from pinedog.transfer import run_transfer  # noqa: E402
+from pinedog.transfer import place_unsynced, run_transfer  # noqa: E402
+from pinedog.protocol import decode_status  # noqa: E402
 
-REC = struct.Struct("<IHBB")
-
-
-def _status(pending: int) -> bytes:
-    # version 1, synced 1, pending, newest minute, battery unknown
-    return struct.pack("<BBIIB", 1, 1, pending, 0, 0xFF)
+STATUS = struct.Struct("<BBIIIBB")
+SYNC_UNIX = 1_700_000_000
 
 
-def _chunk(*recs: tuple[int, int]) -> bytes:
-    """Packs (minute, class) pairs into one Records notification."""
-    return b"".join(REC.pack(minute, 0, cls, 0) for minute, cls in recs)
+def _status(pending: int, uptime: int = 3600, boot: int = 5) -> bytes:
+    return STATUS.pack(2, 1, pending, 0, uptime, boot, 0xFF)
+
+
+def _record(minute: int, cls_byte: int, counts: int = 10, bad_crc: bool = False) -> bytes:
+    covered = struct.pack("<IHB", minute, counts, cls_byte)
+    crc = crc8(covered) ^ (0x01 if bad_crc else 0)
+    return covered + bytes([crc])
+
+
+def _chunk(*records: bytes) -> bytes:
+    return b"".join(records)
 
 
 class FakeLink:
@@ -35,7 +41,7 @@ class FakeLink:
 
     def __init__(self, pending=3, chunks=None, end=True, ack_error=None):
         self.pending = pending
-        self.chunks = chunks if chunks is not None else [_chunk((100, 1), (101, 2))]
+        self.chunks = chunks if chunks is not None else [_chunk(_record(100, 1), _record(101, 2))]
         self.end = end
         self.ack_error = ack_error
         self.calls: list = []
@@ -55,42 +61,43 @@ class FakeLink:
     async def unsubscribe(self):
         self.calls.append(("unsubscribe",))
 
-    async def request(self, from_minute):
-        self.calls.append(("request", from_minute))
+    async def request(self):
+        self.calls.append(("request",))
         for chunk in self.chunks:
             self._on_data(chunk)
         if self.end:
             self._on_data(bytes([END_MARKER]))
 
-    async def write_ack(self, minute):
-        self.calls.append(("ack", minute))
+    async def write_ack(self, count):
+        self.calls.append(("ack", count))
         if self.ack_error:
             raise self.ack_error
 
 
 def _run(link, persist, timeout_s=1.0):
-    return asyncio.run(run_transfer(link, 500, 1_700_000_000, persist, timeout_s=timeout_s))
+    return asyncio.run(run_transfer(link, SYNC_UNIX, persist, timeout_s=timeout_s))
 
 
-def test_persists_before_acking_with_highest_minute():
+def test_persists_before_acking_with_the_record_count():
     link = FakeLink()
     persisted = []
 
-    async def persist(pairs):
-        link.calls.append(("persist", len(pairs)))
-        persisted.extend(pairs)
+    async def persist(records):
+        link.calls.append(("persist", len(records)))
+        persisted.extend(records)
 
-    assert _run(link, persist) == 2
+    result = _run(link, persist)
+    assert result.received == 2 and result.stored == 2
     names = [c[0] for c in link.calls]
     assert names.index("persist") < names.index("ack")
     assert link.calls[-1] == ("ack", 2)
-    assert [rec.minute for rec, _ in persisted] == [100, 101]
+    assert [r.minute for r in persisted] == [100, 101]
 
 
 def test_no_ack_when_persist_fails():
     link = FakeLink()
 
-    async def persist(pairs):
+    async def persist(records):
         raise OSError("disk full")
 
     with pytest.raises(OSError):
@@ -101,7 +108,7 @@ def test_no_ack_when_persist_fails():
 def test_no_ack_when_end_marker_never_arrives():
     link = FakeLink(end=False)
 
-    async def persist(pairs):
+    async def persist(records):
         raise AssertionError("must not persist a partial transfer")
 
     with pytest.raises(asyncio.TimeoutError):
@@ -111,40 +118,74 @@ def test_no_ack_when_end_marker_never_arrives():
 
 
 def test_ack_is_a_count_even_when_minutes_go_backwards():
-    # After a reboot, uptime minutes restart at zero. A minute ack would
-    # release the wrong records here. A count does not depend on minutes.
-    link = FakeLink(chunks=[_chunk((900, 1), (3, 1), (4, 1))])
+    # After a reboot, uptime minutes restart at zero. The ack is a count, so
+    # it does not depend on the minute values the watch sends.
+    link = FakeLink(
+        chunks=[_chunk(_record(900, 1), _record(3, 1), _record(4, 1))],
+        pending=3,
+    )
 
-    async def persist(pairs):
+    async def persist(records):
         pass
 
-    assert _run(link, persist) == 3
+    assert _run(link, persist).received == 3
     assert link.calls[-1] == ("ack", 3)
+
+
+def test_corrupt_records_are_acked_but_not_stored():
+    link = FakeLink(chunks=[_chunk(_record(100, 1), _record(101, 1, bad_crc=True))])
+    seen = []
+
+    async def persist(records):
+        seen.extend(records)
+
+    result = _run(link, persist)
+    assert [r.minute for r in seen] == [100]
+    assert result.corrupt == 1
+    assert link.calls[-1] == ("ack", 2)  # released from the watch, not kept forever
 
 
 def test_nothing_pending_skips_the_transfer():
     link = FakeLink(pending=0)
 
-    async def persist(pairs):
+    async def persist(records):
         raise AssertionError("nothing to persist")
 
-    assert _run(link, persist) == 0
+    assert _run(link, persist).received == 0
     assert [c[0] for c in link.calls] == ["time", "status"]
 
 
-def test_unsynced_records_are_persisted_and_acked():
-    # Records made before the clock was set carry the unsynced bit. They must
-    # still be acked, or they stay in the ring forever.
-    link = FakeLink(chunks=[_chunk((7, CLASS_UNSYNCED_FLAG | 1))])
+def test_unsynced_record_on_current_boot_is_placed_in_unix_time():
+    # Watch uptime 3600 s at sync. A record from uptime minute 10 started
+    # 3600 - 600 = 3000 s before the sync.
+    cls_byte = UNSYNCED_FLAG | (5 << BOOT_SHIFT) | 1
+    link = FakeLink(chunks=[_chunk(_record(10, cls_byte))])
     seen = []
 
-    async def persist(pairs):
-        seen.extend(pairs)
+    async def persist(records):
+        seen.extend(records)
 
-    assert _run(link, persist) == 1
-    assert seen[0][0].minute == 7
-    assert seen[0][1] is False  # not synced, so the coordinator drops it
+    _run(link, persist)
+    assert seen[0].minute == (SYNC_UNIX - 3000) // 60
+    assert seen[0].activity_class == 1
     assert link.calls[-1] == ("ack", 1)
+
+
+def test_unsynced_record_from_an_older_boot_is_acked_but_not_stored():
+    cls_byte = UNSYNCED_FLAG | (4 << BOOT_SHIFT) | 1  # boot 4, watch is on boot 5
+    link = FakeLink(chunks=[_chunk(_record(10, cls_byte))])
+
+    async def persist(records):
+        assert records == []
+
+    result = _run(link, persist)
+    assert result.unplaced == 1 and result.stored == 0
+    assert link.calls[-1] == ("ack", 1)
+
+
+def test_place_unsynced_rejects_minute_past_uptime():
+    st = decode_status(_status(pending=1, uptime=600))
+    assert place_unsynced(11, 5, st, SYNC_UNIX) is None
 
 
 def test_schedule_gates_attempts():

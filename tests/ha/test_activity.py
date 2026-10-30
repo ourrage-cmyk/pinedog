@@ -9,36 +9,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "custom_components"
 
 from activity import (  # noqa: E402
     LIGHT, REST, RUN, WALK, RECORD_SIZE, DailyTotals, Record,
-    baseline_status, daily_totals, decode_records,
+    baseline_status, daily_totals, unpack_raw,
 )
 
 UTC = timezone.utc
 
 
-def pack(minute, counts, cls, cadence=0):
-    return struct.pack("<IHBB", minute, counts, cls, cadence)
+def pack(minute, counts, cls):
+    # The CRC byte is irrelevant here; protocol tests cover it.
+    return struct.pack("<IHBB", minute, counts, cls, 0)
 
 
-def test_decode_roundtrip():
-    payload = pack(1000, 500, WALK, 18) + pack(1001, 3, REST)
-    recs = decode_records(payload)
-    assert recs == [Record(1000, 500, WALK, 18), Record(1001, 3, REST, 0)]
+def test_unpack_roundtrip():
+    payload = pack(1000, 500, WALK) + pack(1001, 3, REST)
+    assert unpack_raw(payload) == [(1000, 500, WALK, 0), (1001, 3, REST, 0)]
     assert RECORD_SIZE == 8
 
 
-def test_decode_rejects_partial_record():
+def test_unpack_rejects_partial_record():
     with pytest.raises(ValueError):
-        decode_records(b"\x00" * 9)
+        unpack_raw(b"\x00" * 9)
 
 
 def test_daily_totals_split_by_day_and_class():
     day0 = 20000 * 1440  # midnight UTC, as minutes
     recs = [
-        Record(day0 + 0, 0, REST, 0),
-        Record(day0 + 1, 400, WALK, 18),
-        Record(day0 + 2, 1500, RUN, 30),
-        Record(day0 + 3, 100, LIGHT, 0),
-        Record(day0 + 1440, 50, REST, 0),
+        Record(day0 + 0, 0, REST),
+        Record(day0 + 1, 400, WALK),
+        Record(day0 + 2, 1500, RUN),
+        Record(day0 + 3, 100, LIGHT),
+        Record(day0 + 1440, 50, REST),
     ]
     totals = daily_totals(recs, UTC)
     d0 = totals[date(2024, 10, 4)]

@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from .coordinator import PinedogCoordinator
 from .protocol import SERVICE_UUID
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor"]
 
 
 @dataclass
