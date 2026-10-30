@@ -70,6 +70,15 @@ struct pd_status {
 
 static struct bt_conn *stream_conn;
 static struct k_work stream_work;
+static struct k_work_delayable window_end_work;
+static int64_t window_until_ms;
+
+/* Last acked transfer, in RAM only. Shown on the screen after a button press. */
+static struct {
+	bool valid;
+	uint32_t records;
+	uint32_t uptime_s;
+} last;
 
 static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			   void *buf, uint16_t len, uint16_t offset)
@@ -134,6 +143,9 @@ static ssize_t write_ack(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	store_lock();
 	store_ack(count);
 	store_unlock();
+	last.valid = true;
+	last.records = count;
+	last.uptime_s = (uint32_t)(k_uptime_get() / 1000);
 	return len;
 }
 
@@ -246,23 +258,78 @@ static ssize_t write_request(struct bt_conn *conn, const struct bt_gatt_attr *at
 	return len;
 }
 
-static const struct bt_data ad[] = {
+/*
+ * Manufacturer data with company id 0xFFFF (reserved for testing) and one flag
+ * byte. Bit 0 asks Home Assistant to sync now, even inside its normal retry
+ * interval. Only sent during a sync window, opened by a button press.
+ */
+static uint8_t sync_request_mfg[] = { 0xFF, 0xFF, PD_ADV_FLAG_SYNC_REQUEST };
+
+static const struct bt_data ad_idle[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
 	BT_DATA(BT_DATA_UUID128_ALL, svc_uuid.val, sizeof(svc_uuid.val)),
 };
 
+static const struct bt_data ad_window[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
+	BT_DATA(BT_DATA_UUID128_ALL, svc_uuid.val, sizeof(svc_uuid.val)),
+	BT_DATA(BT_DATA_MANUFACTURER_DATA, sync_request_mfg, sizeof(sync_request_mfg)),
+};
+
+static bool window_active(void)
+{
+	return k_uptime_get() < window_until_ms;
+}
+
 static void advertise(void)
 {
-	/* 2 s interval keeps the average radio cost low. */
-	int rc = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN,
-						 3200, 3200, NULL),
-				 ad, ARRAY_SIZE(ad), NULL, 0);
+	/* Idle: 2 s interval keeps the average radio cost low. Window: 100 ms, so a host sees it quickly. */
+	bool fast = window_active();
+	int rc;
 
+	bt_le_adv_stop();
+	if (fast) {
+		rc = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, 160, 160, NULL),
+				     ad_window, ARRAY_SIZE(ad_window), NULL, 0);
+	} else {
+		rc = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, 3200, 3200, NULL),
+				     ad_idle, ARRAY_SIZE(ad_idle), NULL, 0);
+	}
 	if (rc && rc != -EALREADY) {
 		LOG_ERR("advertising failed: %d", rc);
 	} else {
-		LOG_DBG("advertising");
+		LOG_DBG("advertising (%s)", fast ? "sync window" : "idle");
 	}
+}
+
+static void window_end(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	LOG_INF("sync window closed");
+	advertise();
+}
+
+void ble_sync_open_window(uint32_t seconds)
+{
+	window_until_ms = k_uptime_get() + (int64_t)seconds * 1000;
+	k_work_reschedule(&window_end_work, K_SECONDS(seconds));
+	advertise();
+	LOG_INF("sync window open for %u s", seconds);
+}
+
+uint32_t ble_sync_window_left_s(void)
+{
+	int64_t left = window_until_ms - k_uptime_get();
+
+	return left > 0 ? (uint32_t)((left + 999) / 1000) : 0;
+}
+
+bool ble_sync_last(struct pd_last_sync *out)
+{
+	out->valid = last.valid;
+	out->records = last.records;
+	out->age_s = last.valid ? (uint32_t)(k_uptime_get() / 1000) - last.uptime_s : 0;
+	return last.valid;
 }
 
 static void connected(struct bt_conn *conn, uint8_t err)
@@ -290,6 +357,7 @@ BT_CONN_CB_DEFINE(conn_cb) = {
 int ble_sync_init(void)
 {
 	k_work_init(&stream_work, stream_records);
+	k_work_init_delayable(&window_end_work, window_end);
 	advertise();
 	return 0;
 }

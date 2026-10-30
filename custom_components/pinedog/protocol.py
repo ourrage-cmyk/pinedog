@@ -20,11 +20,16 @@ ACK_UUID = "5d0f0005-7e0d-4a8b-9d2a-0a1e0c0d0000"
 
 PROTOCOL_VERSION = 2
 END_MARKER = 0xEE
-CLASS_MASK = 0x03  # bits 0..1: REST, LIGHT, WALK, RUN
-BOOT_SHIFT = 2  # bits 2..6: boot id mod 32, set on unsynced records
-BOOT_MASK = 0x1F
+CLASS_MASK = 0x07  # bits 0..2: REST, LIGHT, WALK, RUN, or NOT_WORN (4)
+BOOT_SHIFT = 3  # bits 3..6: boot id mod 16, set on unsynced records
+BOOT_MASK = 0x0F
 UNSYNCED_FLAG = 0x80  # bit 7: made before the clock was set
 BATTERY_UNKNOWN = 0xFF
+
+# Advertised during a button-started sync window (firmware ble_sync.c). Company id
+# 0xFFFF is reserved for testing, so this must be changed before any real release.
+SYNC_REQUEST_COMPANY_ID = 0xFFFF
+SYNC_REQUEST_FLAG = 0x01
 
 FLAG_CLOCK_SYNCED = 1 << 0
 FLAG_CHARGING = 1 << 1
@@ -125,3 +130,9 @@ def decode_chunk(data: bytes) -> list[WireRecord]:
             )
         )
     return out
+
+
+def sync_requested(manufacturer_data: dict[int, bytes]) -> bool:
+    """True when the watch asks for a sync now, inside its button-started window."""
+    data = manufacturer_data.get(SYNC_REQUEST_COMPANY_ID)
+    return bool(data) and bool(data[0] & SYNC_REQUEST_FLAG)

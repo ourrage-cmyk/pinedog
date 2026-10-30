@@ -14,6 +14,9 @@ RECORD_FORMAT = "<IHBB"  # minute, counts, class, crc8 (8 bytes, packed, see pro
 RECORD_SIZE = struct.calcsize(RECORD_FORMAT)
 
 REST, LIGHT, WALK, RUN = 0, 1, 2, 3
+# Written while the watch is on its charger. Not worn: left out of every total.
+NOT_WORN = 4
+KNOWN_CLASSES = {REST, LIGHT, WALK, RUN, NOT_WORN}
 ACTIVE_CLASSES = {LIGHT, WALK, RUN}
 WALKING_CLASSES = {WALK, RUN}
 
@@ -56,6 +59,8 @@ def daily_totals(records: list[Record], tz: timezone) -> dict[date, DailyTotals]
         lambda: {"active": 0, "sedentary": 0, "walking": 0, "motion": 0}
     )
     for rec in records:
+        if rec.activity_class == NOT_WORN:
+            continue
         b = buckets[_day_of(rec.minute, tz)]
         if rec.activity_class in ACTIVE_CLASSES:
             b["active"] += 1

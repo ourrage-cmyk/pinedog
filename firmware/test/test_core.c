@@ -50,22 +50,40 @@ static void test_classify(void)
 	assert(pd_classify(2000, 5, &cfg) == PD_CLASS_LIGHT);
 }
 
-static void test_summary_minute_rollover(void)
+static void test_summary_window_closes_on_clock(void)
 {
 	struct pd_summary s;
 	struct pd_record r;
-	int done = 0;
 
 	pd_summary_reset(&s, 1000);
+	/* still device: 1 g on z, no motion, a full minute of samples */
 	for (int i = 0; i < PD_SAMPLE_RATE_HZ * 60; i++) {
-		/* still device: 1 g on z, no motion */
-		done += pd_summary_push(&s, 0, 0, 1000, &cfg, &r);
+		pd_summary_push(&s, 0, 0, 1000);
 	}
-	assert(done == 1);
+	assert(pd_summary_flush(&s, &cfg, 1001, &r));
 	assert(r.minute == 1000);
 	assert(r.counts == 0);
 	assert(r.class == PD_CLASS_REST);
 	assert(s.minute == 1001);
+}
+
+static void test_summary_sparse_window_is_logged(void)
+{
+	struct pd_summary s;
+	struct pd_record r;
+
+	/* Sensor stalled: no samples at all. The minute must still be logged as rest. */
+	pd_summary_reset(&s, 2000);
+	assert(pd_summary_flush(&s, &cfg, 2001, &r));
+	assert(r.minute == 2000 && r.class == PD_CLASS_REST);
+
+	/* Few samples, all moving: counts scale up to a full minute, so it is not rest. */
+	pd_summary_reset(&s, 3000);
+	for (int i = 0; i < 10; i++) {
+		pd_summary_push(&s, 0, 0, (i % 2) ? 1800 : 200);
+	}
+	assert(pd_summary_flush(&s, &cfg, 3001, &r));
+	assert(r.counts > 0 && r.class != PD_CLASS_REST);
 }
 
 static void test_log_ring(void)
@@ -322,7 +340,8 @@ static void test_reboot_during_erase_keeps_tail_valid(void)
 int main(void)
 {
 	test_classify();
-	test_summary_minute_rollover();
+	test_summary_window_closes_on_clock();
+	test_summary_sparse_window_is_logged();
 	test_log_ring();
 	test_log_overflow_keeps_newest();
 	test_log_restore();

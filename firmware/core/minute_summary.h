@@ -10,6 +10,7 @@ enum pd_class {
 	PD_CLASS_LIGHT = 1,
 	PD_CLASS_WALK = 2,
 	PD_CLASS_RUN = 3,
+	PD_CLASS_NOT_WORN = 4, /* on the charger; excluded from totals by Home Assistant */
 };
 
 /*
@@ -51,13 +52,15 @@ struct pd_summary {
 
 void pd_summary_reset(struct pd_summary *s, uint32_t minute);
 
+/* Accumulates one sample. Never closes a window: the caller closes it on the clock. */
+void pd_summary_push(struct pd_summary *s, int32_t x_mg, int32_t y_mg, int32_t z_mg);
+
 /*
- * Feed one accelerometer sample in milli-g (x, y, z).
- * Returns the completed record when the minute rolls over, otherwise false.
+ * Closes the current window into one record and starts the next at
+ * next_minute. Always returns true; kept as bool for the call sites.
  */
-bool pd_summary_push(struct pd_summary *s, int32_t x_mg, int32_t y_mg,
-		     int32_t z_mg, const struct pd_config *cfg,
-		     struct pd_record *out);
+bool pd_summary_flush(struct pd_summary *s, const struct pd_config *cfg,
+		      uint32_t next_minute, struct pd_record *out);
 
 /* Pure classification, exposed for tests. */
 uint8_t pd_classify(uint16_t counts, uint8_t cadence,

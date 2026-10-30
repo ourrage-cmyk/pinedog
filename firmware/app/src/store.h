@@ -8,10 +8,10 @@
 
 /* Set in the class byte when the record was made before the clock was synced. */
 #define PD_CLASS_UNSYNCED 0x80
-#define PD_CLASS_MASK 0x03u /* bits 0..1: rest, light, walk, run */
-/* Unsynced records carry boot id (mod 32) in bits 2..6 of the class byte. */
-#define PD_BOOT_SHIFT 2
-#define PD_BOOT_MASK 0x1Fu
+#define PD_CLASS_MASK 0x07u /* bits 0..2: class, see enum pd_class */
+/* Class byte: bits 0..2 class (4 = NOT_WORN, charging), bits 3..6 boot id mod 16. */
+#define PD_BOOT_SHIFT 3
+#define PD_BOOT_MASK 0x0Fu
 
 /* Opens the storage partition and resumes the log from the last checkpoint. */
 int store_init(void);
@@ -29,6 +29,9 @@ void store_ack(uint32_t count);
 uint8_t store_boot_id(void);
 
 uint32_t store_pending(void);
+
+/* Counts synced records with an activity class above rest, from minute on. */
+uint32_t store_active_since(uint32_t minute);
 void store_lock(void);
 void store_unlock(void);
 

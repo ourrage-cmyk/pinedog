@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .activity import DailyTotals, Record, baseline_status, daily_totals
+from .protocol import sync_requested
 from .schedule import should_attempt
 from .sync import async_pull_records
 from .transfer import TransferResult
@@ -65,6 +66,8 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         self._pending = 0
         self._dropped_corrupt = 0
         self._dropped_unplaced = 0
+        self._busy = False
+        self._force_next = False
 
     async def async_load(self) -> None:
         raw = await self._store.async_load() or {}
@@ -110,8 +113,10 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         )
 
     async def _async_update_data(self) -> PinedogData:
-        if not self._attempt_allowed():
+        forced, self._force_next = self._force_next, False
+        if not forced and not self._attempt_allowed():
             return self._build()
+        self._busy = True
         self._last_attempt = dt_util.utcnow()
         try:
             await self._sync()
@@ -119,6 +124,8 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         except Exception as err:  # noqa: BLE001 - keep sensors alive on any BLE error
             self._last_error = str(err) or type(err).__name__
             _LOGGER.warning("Pinedog sync failed, will retry: %s", self._last_error)
+        finally:
+            self._busy = False
         return self._build()
 
     def _attempt_allowed(self) -> bool:
@@ -179,7 +186,16 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
 
     @callback
     def handle_advertisement(self, info: BluetoothServiceInfoBleak, change) -> None:
-        """Start a sync when the watch is seen, subject to the attempt schedule."""
-        if not self._attempt_allowed():
+        """Start a sync when the watch is seen.
+
+        A button press on the watch sets a sync request in its advertisement. Then
+        the normal retry schedule is skipped. The watch advertises every 100 ms
+        in that window, so a sync already running is not started again.
+        """
+        if self._busy:
+            return
+        if sync_requested(info.manufacturer_data):
+            self._force_next = True
+        elif not self._attempt_allowed():
             return
         self.hass.async_create_task(self.async_request_refresh())

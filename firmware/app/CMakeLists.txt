@@ -10,6 +10,8 @@ target_sources(app PRIVATE
   src/battery.c
   src/pairing.c
   src/watchdog.c
+  src/button.c
+  src/display.c
   ../core/minute_summary.c
   ../core/ring_log.c
   ../core/journal.c

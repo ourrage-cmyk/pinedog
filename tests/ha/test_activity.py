@@ -73,3 +73,14 @@ def test_baseline_ignores_today_in_history():
     hist = _history([1000] * 6) + [DailyTotals(date(2026, 10, 8), 0, 0, 0, 9999)]
     today = DailyTotals(date(2026, 10, 8), 0, 0, 0, 1000)
     assert baseline_status(today, hist) == "learning"
+
+
+def test_not_worn_minutes_are_left_out_of_totals():
+    # Charging minutes must not count as sedentary or active time.
+    from activity import NOT_WORN
+
+    day0 = 20000 * 1440
+    recs = [Record(day0 + 0, 0, REST), Record(day0 + 1, 0, NOT_WORN), Record(day0 + 2, 500, WALK)]
+    d0 = daily_totals(recs, UTC)[date(2024, 10, 4)]
+    assert d0.sedentary_minutes == 1
+    assert d0.active_minutes == 1

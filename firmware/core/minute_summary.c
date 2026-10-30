@@ -36,14 +36,11 @@ void pd_summary_reset(struct pd_summary *s, uint32_t minute)
 	s->minute = minute;
 }
 
-bool pd_summary_push(struct pd_summary *s, int32_t x_mg, int32_t y_mg,
-		     int32_t z_mg, const struct pd_config *cfg,
-		     struct pd_record *out)
+void pd_summary_push(struct pd_summary *s, int32_t x_mg, int32_t y_mg, int32_t z_mg)
 {
 	uint32_t mag = magnitude_mg(x_mg, y_mg, z_mg);
 	int32_t dyn = (int32_t)mag - 1000; /* remove gravity */
 	int32_t hp;
-	bool done = false;
 
 	if (dyn < 0) {
 		dyn = -dyn;
@@ -68,21 +65,37 @@ bool pd_summary_push(struct pd_summary *s, int32_t x_mg, int32_t y_mg,
 	s->have_prev = 1;
 	s->samples++;
 
-	if (s->samples >= MINUTE_SAMPLES) {
-		uint32_t counts = s->counts_sum / 1000; /* scaled to fit uint16 */
-		/* Each zero crossing pair is one cycle; crossings/2 cycles in 60 s. */
-		uint32_t cycles_per_s_x10 = (uint32_t)s->zero_crossings * 10 / 2 / 60;
+}
 
-		out->minute = s->minute;
-		out->counts = (uint16_t)(counts > 65535 ? 65535 : counts);
-		out->class = pd_classify(out->counts,
-					 (uint8_t)(cycles_per_s_x10 > 255 ? 255 : cycles_per_s_x10),
-					 cfg);
-		out->crc = 0;
-		done = true;
-		pd_summary_reset(s, s->minute + 1);
+/*
+ * Closes the window. Closing is driven by the clock, not by the sample count,
+ * so a window with few samples (sensor stalled, or sparse FIFO reads) still
+ * produces a record. Counts are scaled up to a full minute of samples, so a
+ * sparse window is not read as rest. An empty window is rest.
+ */
+bool pd_summary_flush(struct pd_summary *s, const struct pd_config *cfg,
+		      uint32_t next_minute, struct pd_record *out)
+{
+	uint32_t counts = 0;
+	uint32_t cycles_per_s_x10 = 0;
+
+	if (s->samples > 0) {
+		uint64_t scaled = (uint64_t)s->counts_sum * MINUTE_SAMPLES / s->samples / 1000;
+
+		counts = scaled > 65535 ? 65535 : (uint32_t)scaled;
+		/* Two zero crossings per cycle; cycles per second, times ten. */
+		cycles_per_s_x10 = (uint32_t)((uint64_t)s->zero_crossings * 10 *
+					      PD_SAMPLE_RATE_HZ / (2 * s->samples));
 	}
-	return done;
+
+	out->minute = s->minute;
+	out->counts = (uint16_t)counts;
+	out->class = pd_classify(out->counts,
+				 (uint8_t)(cycles_per_s_x10 > 255 ? 255 : cycles_per_s_x10),
+				 cfg);
+	out->crc = 0;
+	pd_summary_reset(s, next_minute);
+	return true;
 }
 
 uint8_t pd_classify(uint16_t counts, uint8_t cadence,

@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from .activity import Record
+from .activity import KNOWN_CLASSES, Record
 from .protocol import Status, WireRecord, decode_chunk, decode_status, is_end_marker
 
 TRANSFER_TIMEOUT_S = 120
@@ -106,7 +106,7 @@ async def run_transfer(
     records: list[Record] = []
     corrupt = unplaced = 0
     for rec in wire:
-        if not rec.crc_ok:
+        if not rec.crc_ok or rec.activity_class not in KNOWN_CLASSES:
             corrupt += 1
             continue
         minute = rec.minute

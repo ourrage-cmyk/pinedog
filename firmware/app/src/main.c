@@ -17,6 +17,8 @@
 #include <zephyr/logging/log.h>
 
 #include "battery.h"
+#include "button.h"
+#include "display.h"
 #include "ble_sync.h"
 #include "clock.h"
 #include "minute_summary.h"
@@ -41,8 +43,12 @@ static const struct pd_config cfg = {
 	.run_cadence_min = 30,
 };
 
+#define WINDOW_PERIOD K_SECONDS(60)
+
 static struct pd_summary summary;
+static struct k_mutex summary_lock;
 static struct k_work_delayable status_log;
+static struct k_work_delayable window_tick;
 
 /* Converts a sensor value in m/s^2 to milli-g. */
 static int32_t to_mg(const struct sensor_value *v)
@@ -56,7 +62,6 @@ static void on_data_ready(const struct device *dev,
 			  const struct sensor_trigger *trig)
 {
 	struct sensor_value xyz[3];
-	struct pd_record rec;
 
 	ARG_UNUSED(trig);
 	if (sensor_sample_fetch_chan(dev, SENSOR_CHAN_ACCEL_XYZ)) {
@@ -65,28 +70,40 @@ static void on_data_ready(const struct device *dev,
 	if (sensor_channel_get(dev, SENSOR_CHAN_ACCEL_XYZ, xyz)) {
 		return;
 	}
+	k_mutex_lock(&summary_lock, K_FOREVER);
+	pd_summary_push(&summary, to_mg(&xyz[0]), to_mg(&xyz[1]), to_mg(&xyz[2]));
+	k_mutex_unlock(&summary_lock);
+}
 
-	if (!pd_summary_push(&summary, to_mg(&xyz[0]), to_mg(&xyz[1]),
-			     to_mg(&xyz[2]), &cfg, &rec)) {
-		return;
+/*
+ * Closes one window every minute by the clock. Every window is logged, even
+ * if the watch did not move: an empty window is rest, and a sparse window is
+ * scaled up, so quiet sleeping dogs still show up as sedentary time. Nothing
+ * here depends on motion.
+ */
+static void close_window(struct k_work *work)
+{
+	struct pd_record rec;
+
+	ARG_UNUSED(work);
+	k_mutex_lock(&summary_lock, K_FOREVER);
+	pd_summary_flush(&summary, &cfg, clock_minute(), &rec);
+	k_mutex_unlock(&summary_lock);
+
+	/* On the charger the minute is NOT_WORN; Home Assistant leaves it out of totals. */
+	if (battery_charging()) {
+		rec.class = PD_CLASS_NOT_WORN;
 	}
-
-	/* The record is for the minute that just ended. */
-	uint32_t minute = clock_minute();
-
-	rec.minute = minute > 0 ? minute - 1 : 0;
-	if (clock_synced()) {
-		rec.class &= PD_CLASS_MASK;
-	} else {
+	if (!clock_synced()) {
 		/* Keep the boot id so Home Assistant can place the record later. */
 		rec.class = (rec.class & PD_CLASS_MASK) | PD_CLASS_UNSYNCED |
 			    ((store_boot_id() & PD_BOOT_MASK) << PD_BOOT_SHIFT);
 	}
-	/* Last field of the record: CRC-8 over the other seven bytes. */
 	rec.crc = pd_record_crc(&rec);
 	store_lock();
 	store_append(&rec);
 	store_unlock();
+	k_work_reschedule(&window_tick, WINDOW_PERIOD);
 }
 
 static void log_status(struct k_work *work)
@@ -156,8 +173,19 @@ int main(void)
 		return rc;
 	}
 	ble_sync_init();
+	rc = button_init();
+	if (rc) {
+		LOG_ERR("button init failed: %d", rc);
+	}
+	rc = display_init();
+	if (rc) {
+		LOG_ERR("display init failed: %d", rc);
+	}
 
 	pd_summary_reset(&summary, clock_minute());
+	k_mutex_init(&summary_lock);
+	k_work_init_delayable(&window_tick, close_window);
+	k_work_reschedule(&window_tick, WINDOW_PERIOD);
 	k_work_init_delayable(&status_log, log_status);
 	k_work_reschedule(&status_log, K_SECONDS(30));
 	LOG_INF("pinedog started, boot %u, %u records pending",

@@ -57,22 +57,29 @@ Sampling loop:
    - `walk`: rhythmic movement at walking cadence with moderate counts
    - `run`: rhythmic movement with high counts / higher cadence
 
-   Thresholds live in a config characteristic so they can be tuned from Home
-   Assistant after watching real data, without reflashing.
+   Thresholds are compile-time constants in v0.2.0. The plan is a config
+   characteristic so they can be tuned from Home Assistant without reflashing
+   (not implemented yet).
 
-Per-minute record (8 bytes):
+Per-minute record (8 bytes, see `docs/FIRMWARE.md` for the exact layout):
 
 | Field | Type | Notes |
 |---|---|---|
-| minute | uint32 | minutes since Unix epoch |
+| minute | uint32 | unix minute when the clock is set, uptime minute before |
 | counts | uint16 | saturating |
-| class | uint8 | 0 rest, 1 light, 2 walk, 3 run |
-| cadence | uint8 | in 0.1 Hz units |
+| class | uint8 | bits 0–2: 0 rest, 1 light, 2 walk, 3 run, 4 not worn (charging); bits 3–6 boot id mod 16; bit 7 unsynced |
+| crc | uint8 | CRC-8 over the other seven bytes |
 
-That is 11.5 KB per day. The log is a ring buffer in SPI flash (4 KB sectors,
-erased one sector ahead of the write pointer), holding about a year before
-wrapping. Unsynced data is never lost unless the dog is out of range for a
-year.
+Cadence is used on the watch to pick the class and is not stored.
+
+Every minute is logged, even when the dog is still. The window closes on the
+clock, so a quiet dog is rest, not missing data. Charging minutes are written
+as not worn, and Home Assistant leaves them out of all totals.
+
+That is about 11.5 KB per day. The log is a ring buffer in the external SPI
+flash, in 992 KB of the 4 MB chip (4 KB sectors, erased one sector ahead of the
+write pointer). It holds about 88 days of minutes before wrapping. Records only
+leave the ring when Home Assistant acks them.
 
 The head and count are checkpointed after every append and every ack. The
 checkpoints go into a two-sector journal of 16-byte CRC-protected entries
@@ -80,14 +87,18 @@ checkpoints go into a two-sector journal of 16-byte CRC-protected entries
 cut never leaves the watch with an empty or stale ring. See
 `docs/RESEARCH.md` for the reasons.
 
-Button: a short press lights the screen for 5 seconds with battery %, today's
-active minutes and whether the last sync worked. Otherwise the display is off.
+Button: a press turns the screen on for 30 seconds with battery, pending records,
+last sync result, boot id, active minutes in the last 24 hours, and pairing
+state. It also opens a 60-second pairing window and a sync window, in which
+Home Assistant is asked to connect promptly. The screen is off at all other
+times, including boot.
 
 ### 2. Bluetooth sync
 
 - The watch advertises a Pinedog service UUID every 2 s (≈ 20 µA average).
-  The advertisement carries battery % and the number of unsynced records, so
-  Home Assistant knows whether a connection is worth making.
+  After a button press it advertises every 100 ms for 60 s, with a sync-request
+  flag in manufacturer data (company id 0xFFFF, reserved for testing). Home
+  Assistant then connects without waiting for its normal retry interval.
 - Home Assistant connects when it sees the watch and there is anything to
   sync. It writes the current time, requests the records, and receives every
   pending record in notifications sized to the link MTU (up to 16 records
@@ -109,11 +120,11 @@ GATT service `Pinedog`:
 | Characteristic | Access | Purpose |
 |---|---|---|
 | Time | write | Unix time from Home Assistant |
-| Status | read | battery, firmware version, oldest/newest record, unsynced count |
+| Status | read | version 2, flags, pending, newest minute, uptime, boot id, battery (16 bytes) |
 | Request | write | "start a transfer": the watch snapshots its pending count and streams exactly that many records |
 | Records | notify | packed 8-byte records |
 | Ack | write | "I stored the N oldest records" (a count, sent only after storing; the watch drops its N oldest) |
-| Config | read/write | classifier thresholds, advertising interval |
+| Config | read/write | planned, not implemented: classifier thresholds |
 
 ### 3. Home Assistant integration (`custom_components/pinedog/`)
 

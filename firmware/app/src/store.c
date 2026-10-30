@@ -116,6 +116,49 @@ uint32_t store_pending(void)
 	return pd_log_pending(&log);
 }
 
+/*
+ * Walks back from the newest record in chunks, so the lock is held only for
+ * one read at a time and logging is never blocked for long. Unsynced records
+ * carry uptime minutes, not unix minutes, so they are skipped.
+ */
+uint32_t store_active_since(uint32_t minute)
+{
+	struct pd_record batch[16];
+	uint32_t total = 0;
+	uint32_t end;
+
+	store_lock();
+	end = pd_log_pending(&log);
+	store_unlock();
+
+	while (end > 0) {
+		uint32_t n = end < 16 ? end : 16;
+		uint32_t from = end - n;
+		int got;
+
+		store_lock();
+		got = pd_log_read(&log, from, batch, n);
+		store_unlock();
+		if (got <= 0) {
+			break;
+		}
+		for (int i = got - 1; i >= 0; i--) {
+			if (batch[i].class & PD_CLASS_UNSYNCED) {
+				continue;
+			}
+			if (batch[i].minute < minute) {
+				return total;
+			}
+			const uint8_t cls = batch[i].class & PD_CLASS_MASK;
+			if (cls >= PD_CLASS_LIGHT && cls <= PD_CLASS_RUN) {
+				total++;
+			}
+		}
+		end = from;
+	}
+	return total;
+}
+
 void store_checkpoint(void)
 {
 	checkpoint_locked();

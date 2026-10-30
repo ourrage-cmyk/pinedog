@@ -85,3 +85,12 @@ def test_chunk_flags_a_bad_crc():
 def test_chunk_rejects_partial_record():
     with pytest.raises(ValueError):
         decode_chunk(b"\x00" * 9)
+
+
+def test_sync_request_flag_in_manufacturer_data():
+    from pinedog.protocol import sync_requested
+
+    assert sync_requested({0xFFFF: bytes([0x01])})
+    assert not sync_requested({0xFFFF: bytes([0x00])})
+    assert not sync_requested({0x004C: bytes([0x01])})
+    assert not sync_requested({})
