@@ -1,0 +1,22 @@
+{
+  "domain": "pinedog",
+  "name": "Pinedog",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [
+    "bluetooth_adapters"
+  ],
+  "documentation": "https://github.com/ourrage-cmyk/pinedog",
+  "bluetooth": [
+    {
+      "service_uuid": "5d0f0000-7e0d-4a8b-9d2a-0a1e0c0d0000",
+      "connectable": true
+    }
+  ],
+  "requirements": [
+    "bleak-retry-connector>=3.5.0"
+  ],
+  "iot_class": "local_push",
+  "integration_type": "device",
+  "version": "0.1.0"
+}

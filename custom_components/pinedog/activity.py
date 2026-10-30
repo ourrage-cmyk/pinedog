@@ -8,7 +8,7 @@ from __future__ import annotations
 import struct
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 RECORD_FORMAT = "<IHBB"  # minute, counts, class, cadence (8 bytes, packed)
 RECORD_SIZE = struct.calcsize(RECORD_FORMAT)
