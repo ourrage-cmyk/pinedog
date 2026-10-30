@@ -15,8 +15,12 @@ RECORD_FORMAT = "<IHBB"  # minute, counts, class, cadence (8 bytes, packed)
 RECORD_SIZE = struct.calcsize(RECORD_FORMAT)
 
 REST, LIGHT, WALK, RUN = 0, 1, 2, 3
+# Written while the watch is on its charger. This is the only "not worn"
+# state. A quiet dog is REST, which is sedentary time and always counts.
+NOT_WORN = 4
 ACTIVE_CLASSES = {LIGHT, WALK, RUN}
 WALKING_CLASSES = {WALK, RUN}
+KNOWN_CLASSES = {REST, LIGHT, WALK, RUN, NOT_WORN}
 
 MINUTES_PER_DAY = 1440
 
@@ -67,11 +71,18 @@ def _day_of(minute: int, tz: timezone) -> date:
 
 
 def daily_totals(records: list[Record], tz: timezone) -> dict[date, DailyTotals]:
-    """Aggregate minute records into per-day totals in the given timezone."""
+    """Aggregate minute records into per-day totals in the given timezone.
+
+    Every minute the watch is worn has a record, and a quiet minute is REST,
+    so it adds to sedentary time. Only NOT_WORN (charging) minutes are left
+    out. Minutes with no record at all are missing data, not rest.
+    """
     buckets: dict[date, dict[str, int]] = defaultdict(
         lambda: {"active": 0, "sedentary": 0, "walking": 0, "motion": 0}
     )
     for rec in records:
+        if rec.activity_class == NOT_WORN:
+            continue  # on the charger: not wear time, so not in any total
         b = buckets[_day_of(rec.minute, tz)]
         if rec.activity_class in ACTIVE_CLASSES:
             b["active"] += 1

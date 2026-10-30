@@ -69,10 +69,12 @@ Per-minute record (8 bytes):
 |---|---|---|
 | minute | uint32 | minutes since Unix epoch |
 | counts | uint16 | saturating |
-| class | uint8 | 0 rest, 1 light, 2 walk, 3 run |
+| class | uint8 | 0 rest, 1 light, 2 walk, 3 run, 4 not worn (on charger) |
 | cadence | uint8 | in 0.1 Hz units |
 
-That is 11.5 KB per day. Records are collected in RAM and flushed to flash
+Every minute gets a record, including a quiet one (rest) and a minute on the
+charger (class 4). Stillness is never a reason to skip a minute. The only
+non-wear state is charging. Records are collected in RAM and flushed to flash
 every 10 minutes. The log is a ring buffer in SPI flash (4 KB sectors,
 erased one sector ahead of the write pointer), holding about a year before
 wrapping. Unsynced data is never lost unless the dog is out of range for a

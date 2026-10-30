@@ -51,3 +51,15 @@ def test_chunk_unsynced_flag_is_split_out():
     assert out[0][1] is True and out[0][0].activity_class == 1
     assert out[1][1] is False and out[1][0].activity_class == 2
     assert out[1][0].cadence == 18
+
+
+def test_unknown_class_is_rejected_after_unsynced_flag_is_removed():
+    from pinedog.protocol import decode_chunk
+
+    # 9 is not a class. 0x80 | 9 is the same record marked unsynced.
+    with pytest.raises(ValueError):
+        decode_chunk(struct.pack("<IHBB", 1000, 5, 9, 0))
+    with pytest.raises(ValueError):
+        decode_chunk(struct.pack("<IHBB", 1000, 5, 0x80 | 9, 0))
+    recs = decode_chunk(struct.pack("<IHBB", 1000, 5, 0x80 | 4, 0))
+    assert recs[0][0].activity_class == 4 and recs[0][1] is False

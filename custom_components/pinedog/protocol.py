@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-from .activity import RECORD_SIZE, Record, decode_records
+from .activity import KNOWN_CLASSES, RECORD_SIZE, Record, decode_records
 
 SERVICE_UUID = "5d0f0000-7e0d-4a8b-9d2a-0a1e0c0d0000"
 TIME_UUID = "5d0f0001-7e0d-4a8b-9d2a-0a1e0c0d0000"
@@ -67,5 +67,7 @@ def decode_chunk(data: bytes) -> list[tuple[Record, bool]]:
     for rec in decode_records(data):
         synced = not (rec.activity_class & CLASS_UNSYNCED_FLAG)
         cls = rec.activity_class & ~CLASS_UNSYNCED_FLAG
+        if cls not in KNOWN_CLASSES:
+            raise ValueError(f"unknown activity class {cls} at minute {rec.minute}")
         out.append((Record(rec.minute, rec.counts, cls, rec.cadence), synced))
     return out

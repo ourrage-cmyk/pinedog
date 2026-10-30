@@ -60,7 +60,10 @@ against the BMA421 datasheet before the firmware is written:
    walking.
 5. **Hold off on duty cycling and any-motion gating.** Both save current when
    the dog is still, but they change the counts and bias the baseline. Measure
-   first, and revisit only if the battery target is missed.
+   first, and revisit only if the battery target is missed. Any gating must
+   still write one record for every minute. A minute without sensor
+   samples is written as REST with zero counts, and it is never skipped.
+   Skipping it would turn a quiet dog into a missing day.
 6. **Test low-power mode at 25 Hz.** Its current is lower than normal mode in
    the BMA400 table. It is worth one comparison on logs: if the counts match
    normal mode and the FIFO works in that mode, it is the cheaper option.
@@ -124,9 +127,25 @@ odd days, and gives a usable answer from the first week.
 
 ### How a day is measured
 
-For each day, the integration takes the minutes that were recorded (active and
-sedentary minutes, so watch-off time is excluded) and scales them to a full
-day:
+### Wear rules
+
+The rules are fixed so that stillness never reads as non-wear:
+
+- **Quiet is sedentary.** A minute below the rest threshold is class REST,
+  counted as sedentary time. A dog asleep all day is 1440 sedentary minutes,
+  not a day the watch was off. The rest threshold (`rest_max` in the
+  firmware) is the tunable line between quiet and light.
+- **Charging is the only not-worn time.** While the watch is on its charger,
+  every minute is written as class 4 (NOT_WORN). Those minutes are left out of
+  all totals and out of the wear count.
+- **A missing record is data loss.** A minute with no record is not rest and
+  not wear. It is not in the totals, and days are scaled by the minutes that
+  were recorded. Gaps should be rare, since the firmware writes every minute.
+
+### How a day is measured
+
+For each day, the integration takes the minutes that were recorded as active or
+sedentary (charging minutes excluded) and scales them to a full day:
 
     full_day_counts = motion_counts × 1440 / worn_minutes
 
@@ -173,7 +192,7 @@ with too little wear being ignored; outlier days (very high and zero) not
 moving the baseline; missing days; the 60-day window; the weekday effect; and
 the waiting status.
 
-A synthetic run (91 days, 15% missing days, random watch-off, Saturday walks
+A synthetic run (91 days, 15% missing days, random wear and charging gaps, Saturday walks
 at 1.6× the usual level, and a two-day illness) gave a status of `normal`
 from day 14 onward, and `percent` between 99 and 101 on the weekdays checked.
 On Saturdays the percent read 136 to 149 because the weekday effect was only

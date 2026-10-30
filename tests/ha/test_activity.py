@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "custom_components" / "pinedog"))
 
 from activity import (  # noqa: E402
-    LIGHT, REST, RUN, WALK, RECORD_SIZE, DailyTotals, Record,
+    LIGHT, NOT_WORN, REST, RUN, WALK, RECORD_SIZE, DailyTotals, Record,
     compute_baseline, daily_totals, decode_records,
 )
 
@@ -177,3 +177,35 @@ def test_percent_uses_full_day_estimate():
     # 60 minutes of wear with 5000 counts is 120,000 counts over a full day.
     base = compute_baseline(DailyTotals(TODAY, 60, 0, 0, 5_000), _steady(30, 200_000))
     assert base.percent == pytest.approx(100 * 120_000 / base.expected_counts)
+
+
+def test_quiet_day_counts_as_sedentary_not_non_wear():
+    # A dog asleep all day: every minute is REST with zero counts. That is
+    # 1440 minutes of sedentary wear, not a day the watch was off.
+    day0 = 20000 * 1440
+    recs = [Record(day0 + m, 0, REST, 0) for m in range(1440)]
+    d = daily_totals(recs, UTC)[date(2024, 10, 4)]
+    assert d.sedentary_minutes == 1440
+    assert d.active_minutes == 0
+    assert d.motion_counts == 0
+
+
+def test_charging_minutes_are_not_wear():
+    day0 = 20000 * 1440
+    recs = [Record(day0 + m, 0, NOT_WORN, 0) for m in range(600)]
+    recs += [Record(day0 + 600 + m, 0, REST, 0) for m in range(240)]
+    d = daily_totals(recs, UTC)[date(2024, 10, 4)]
+    assert d.sedentary_minutes == 240
+
+
+def test_charging_day_is_not_baseline_wear():
+    # A day spent mostly on the charger has too little wear to count.
+    day = DailyTotals(date(2026, 10, 29), 60, 200, 0, 50_000)
+    assert day.active_minutes + day.sedentary_minutes < 360
+    hist = _steady(10, 200_000) + [day]
+    base = compute_baseline(DailyTotals(TODAY, 1440, 0, 0, 200_000), hist)
+    assert base.days_learned == 10
+
+
+def test_decode_accepts_not_worn_class():
+    assert decode_records(pack(1000, 0, NOT_WORN))[0].activity_class == NOT_WORN
