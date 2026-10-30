@@ -30,5 +30,6 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --title "Pinedog $GITHUB_REF_NAME" \
-            --notes "Integration version ${GITHUB_REF_NAME#v}. The firmware image for this version is in firmware/release/ (see README)." \
-            --verify-tag
+            --notes "Integration version ${GITHUB_REF_NAME#v}. Attached: the firmware image (.hex) for the PineTime and SHA256SUMS. Check the checksum before flashing; see README." \
+            --verify-tag \
+            firmware/release/*.hex firmware/release/SHA256SUMS

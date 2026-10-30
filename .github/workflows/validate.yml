@@ -16,9 +16,8 @@ jobs:
         with:
           category: integration
           # Optional for a personal custom repository: GitHub description, topics,
-          # brand assets. License is also skipped: HACS reads it from the default
-          # branch, so it cannot see LICENSE until this branch is merged.
-          ignore: "brands description topics license"
+          # brand assets. The license is checked on the default branch.
+          ignore: "brands description topics"
 
   hassfest:
     name: Hassfest validation
