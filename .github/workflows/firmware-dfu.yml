@@ -71,10 +71,11 @@ jobs:
           python3 - "$RUNNER_TEMP/pinedog.bin" <<'PY'
           import struct, sys
           data = open(sys.argv[1], "rb").read()
-          # Zephyr's zephyr.bin starts at the first code byte, 0x8020 (header is 32 bytes).
+          # zephyr.bin starts at 0x8000 with 256 bytes of padding; the vector table is at 0x8100.
+          data = data[256:]
           sp, reset = struct.unpack_from("<II", data, 0)
           assert 0x20000000 <= sp < 0x20010000, f"bad initial SP {sp:#x}"
-          assert 0x8020 <= (reset & ~1) < 0x8000 + 0x74000, f"reset vector {reset:#x} outside app slot"
+          assert 0x8100 <= (reset & ~1) < 0x8000 + 0x74000, f"reset vector {reset:#x} outside app slot"
           assert reset & 1, "reset vector is not Thumb"
           print(f"ok: SP {sp:#x}, reset {reset:#x}, size {len(data)} bytes")
           PY
@@ -94,7 +95,7 @@ jobs:
           data = open(sys.argv[1], "rb").read()
           magic, load, hdr, prot, img_size = struct.unpack_from("<IIHHI", data, 0)
           assert magic == 0x96F3B83D, f"bad image magic {magic:#x}"
-          assert hdr == 32, f"bad header size {hdr}"
+          assert hdr == 256, f"bad header size {hdr}"
           body_end = hdr + img_size
           tlv_magic, tlv_tot = struct.unpack_from("<HH", data, body_end)
           assert tlv_magic == 0x6907, f"bad TLV magic {tlv_magic:#x}"

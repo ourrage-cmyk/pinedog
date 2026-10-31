@@ -17,8 +17,18 @@ IMGTOOL="$4"
 mkdir -p "$OUT"
 NAME="pinedog-mcuboot-app-$VERSION"
 
-python3 "$IMGTOOL" create --align 1 --version "$VERSION" --header-size 32 \
-  --slot-size 475136 --pad-header "$BIN" "$OUT/$NAME-image.bin"
+# Zephyr's zephyr.bin starts at 0x8000 with 256 bytes of zero padding; the
+# vector table starts at 0x8100. Drop the padding so the body starts at 0x8100,
+# and build the image with a 256-byte header.
+python3 - "$BIN" "$OUT/$NAME-body.bin" <<'PY'
+import sys
+data = open(sys.argv[1], "rb").read()
+assert data[:256] == b"\x00" * 256, "expected 256 bytes of zero padding at 0x8000"
+open(sys.argv[2], "wb").write(data[256:])
+PY
+
+python3 "$IMGTOOL" create --align 1 --version "$VERSION" --header-size 256 \
+  --slot-size 475136 --pad-header "$OUT/$NAME-body.bin" "$OUT/$NAME-image.bin"
 
 # The image starts at the app slot, 0x8000.
 arm-none-eabi-objcopy -I binary -O ihex --change-addresses=0x8000 \
