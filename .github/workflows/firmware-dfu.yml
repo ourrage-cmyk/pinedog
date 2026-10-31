@@ -85,7 +85,7 @@ jobs:
           pip install adafruit-nrfutil
           git clone --depth 1 --branch "$INFINITIME_TAG" https://github.com/InfiniTimeOrg/InfiniTime "$RUNNER_TEMP/infinitime"
           pip install -r "$RUNNER_TEMP/infinitime/tools/mcuboot/requirements.txt"
-          firmware/app/mcuboot/package-dfu.sh "$RUNNER_TEMP/pinedog.bin" "$PINEDOG_VERSION" \
+          bash firmware/app/mcuboot/package-dfu.sh "$RUNNER_TEMP/pinedog.bin" "$PINEDOG_VERSION" \
             "$RUNNER_TEMP/out" "$RUNNER_TEMP/infinitime/tools/mcuboot/imgtool.py"
 
       - name: Verify the image header and SHA-256 TLV
