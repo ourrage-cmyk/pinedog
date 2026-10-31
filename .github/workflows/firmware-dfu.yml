@@ -53,6 +53,19 @@ jobs:
           ./build.sh -- -DOVERLAY_CONFIG="$PWD/mcuboot/mcuboot.conf"
           cp "$HOME/zephyr-ws/build-app/zephyr/zephyr.bin" "$RUNNER_TEMP/pinedog.bin"
 
+      - name: Diagnose the image layout
+        if: always()
+        run: |
+          z="$HOME/zephyr-ws/build-app/zephyr"
+          {
+            echo "== config"; grep -E 'FLASH_LOAD|ROM_START|FLASH_BASE' "$z/.config" || true
+            echo "== load segments"; arm-none-eabi-readelf -lW "$z/zephyr.elf" | grep -E 'LOAD|Entry' || true
+            echo "== symbols"; arm-none-eabi-nm -n "$z/zephyr.elf" | grep -E '_vector_table|__reset|z_arm_reset' | head -5 || true
+            echo "== bin head"; od -A x -t x4 -N 16 "$RUNNER_TEMP/pinedog.bin" || true
+            echo "== bin size"; ls -l "$RUNNER_TEMP/pinedog.bin" || true
+          } > "$RUNNER_TEMP/diag.txt" 2>&1
+          python3 -c 'import sys; t=open(sys.argv[1]).read().replace("%","%25").replace("\r","").replace("\n","%0A"); print("::notice title=layout diagnostics::"+t)' "$RUNNER_TEMP/diag.txt"
+
       - name: Check the image layout
         run: |
           python3 - "$RUNNER_TEMP/pinedog.bin" <<'PY'
