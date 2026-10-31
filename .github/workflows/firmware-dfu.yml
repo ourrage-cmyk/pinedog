@@ -1,0 +1,115 @@
+name: Firmware DFU (Bluetooth)
+
+# Builds the Pinedog app for the stock PineTime MCUboot bootloader, so it can be
+# installed over Bluetooth without SWD. Also publishes the InfiniTime 1.16.1 DFU
+# zip, verified against its GitHub digest, so the watch can be restored.
+# Not tested on hardware. See README "Update over Bluetooth".
+
+on:
+  push:
+    branches: [dfu-0x8000]
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware-dfu.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PINEDOG_VERSION: "0.2.1"
+  INFINITIME_TAG: "1.16.1"
+  INFINITIME_DFU_SHA256: "dcc13be8b03fd8c77c34fc957b78e11d89e968c55e0dfb4de0b9f5d61da07bb7"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi build-essential cmake ninja-build
+          pip install west
+
+      - name: Fetch Zephyr v4.4.0
+        run: |
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 "$HOME/zephyr-ws"
+          cd "$HOME/zephyr-ws"
+          west update --narrow -o=--depth=1
+          pip install -r zephyr/scripts/requirements-base.txt
+
+      - name: Host tests
+        run: make -C firmware test
+
+      - name: Build for the MCUboot app slot
+        run: |
+          cd firmware/app
+          ./build.sh -- -DOVERLAY_CONFIG="$PWD/mcuboot/mcuboot.conf"
+          cp "$HOME/zephyr-ws/build-app/zephyr/zephyr.bin" "$RUNNER_TEMP/pinedog.bin"
+
+      - name: Check the image layout
+        run: |
+          python3 - "$RUNNER_TEMP/pinedog.bin" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          # Zephyr's zephyr.bin starts at the first code byte, 0x8020 (header is 32 bytes).
+          sp, reset = struct.unpack_from("<II", data, 0)
+          assert 0x20000000 <= sp < 0x20010000, f"bad initial SP {sp:#x}"
+          assert 0x8020 <= (reset & ~1) < 0x8000 + 0x74000, f"reset vector {reset:#x} outside app slot"
+          assert reset & 1, "reset vector is not Thumb"
+          print(f"ok: SP {sp:#x}, reset {reset:#x}, size {len(data)} bytes")
+          PY
+
+      - name: Package MCUboot DFU
+        run: |
+          pip install adafruit-nrfutil
+          git clone --depth 1 --branch "$INFINITIME_TAG" https://github.com/InfiniTimeOrg/InfiniTime "$RUNNER_TEMP/infinitime"
+          pip install -r "$RUNNER_TEMP/infinitime/tools/mcuboot/requirements.txt"
+          firmware/app/mcuboot/package-dfu.sh "$RUNNER_TEMP/pinedog.bin" "$PINEDOG_VERSION" \
+            "$RUNNER_TEMP/out" "$RUNNER_TEMP/infinitime/tools/mcuboot/imgtool.py"
+
+      - name: Verify the image header and SHA-256 TLV
+        run: |
+          python3 - "$RUNNER_TEMP/out/pinedog-mcuboot-app-$PINEDOG_VERSION-image.bin" <<'PY'
+          import hashlib, struct, sys
+          data = open(sys.argv[1], "rb").read()
+          magic, load, hdr, prot, img_size = struct.unpack_from("<IIHHI", data, 0)
+          assert magic == 0x96F3B83D, f"bad image magic {magic:#x}"
+          assert hdr == 32, f"bad header size {hdr}"
+          body_end = hdr + img_size
+          tlv_magic, tlv_tot = struct.unpack_from("<HH", data, body_end)
+          assert tlv_magic == 0x6907, f"bad TLV magic {tlv_magic:#x}"
+          off, digest = body_end + 4, None
+          while off < body_end + tlv_tot:
+              t, _, ln = struct.unpack_from("<BBH", data, off)
+              if t == 0x10:
+                  digest = data[off + 4:off + 4 + ln]
+              off += 4 + ln
+          assert digest is not None, "no SHA-256 TLV"
+          assert digest == hashlib.sha256(data[:body_end]).digest(), "SHA-256 TLV does not match"
+          print(f"ok: header {hdr} bytes, image {img_size} bytes, SHA-256 TLV matches")
+          PY
+
+      - name: Fetch InfiniTime rollback zip
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/out/infinitime-$INFINITIME_TAG-dfu.zip" \
+            "https://github.com/InfiniTimeOrg/InfiniTime/releases/download/$INFINITIME_TAG/pinetime-mcuboot-app-dfu-$INFINITIME_TAG.zip"
+          echo "$INFINITIME_DFU_SHA256  $RUNNER_TEMP/out/infinitime-$INFINITIME_TAG-dfu.zip" | sha256sum -c -
+
+      - name: Checksums
+        run: |
+          cd "$RUNNER_TEMP/out"
+          sha256sum pinedog-mcuboot-app-*-dfu.zip infinitime-*-dfu.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinedog-bluetooth-dfu
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
