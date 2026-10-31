@@ -193,6 +193,34 @@ If the watch shows nothing and does not respond to the button, it may have
 crashed in a bad state. Use the SWD connection and Step 4 to flash the backup.
 A backup taken in Step 2 always restores the old behaviour.
 
+## Update over Bluetooth (sealed watch, no SWD)
+
+**Not tested on hardware.** The image is built on GitHub by `.github/workflows/firmware-dfu.yml`
+(artifact `pinedog-bluetooth-dfu`). The build checks the image header and SHA-256 hash. The stock
+bootloader does not check a signature, so an unsigned image is accepted.
+
+Files in the artifact:
+
+- `pinedog-mcuboot-app-0.2.1-dfu.zip`: Pinedog. Install this.
+- `infinitime-1.16.1-dfu.zip`: InfiniTime 1.16.1, the rollback. Keep it on your phone.
+- `SHA256SUMS`: check both zips before you install.
+
+You need a phone with **nRF Connect for Mobile** (Nordic, free). Keep the watch charged and close to the phone.
+
+1. In a terminal on your computer, run `sha256sum -c SHA256SUMS`. Both lines must say `OK`.
+2. Copy both zips to the phone.
+3. Open nRF Connect, go to **Scanner**, and connect to the PineTime (InfiniTime shows as `InfiniTime`).
+4. Tap **DFU**, choose **Distribution packet (ZIP)**, and pick `pinedog-mcuboot-app-0.2.1-dfu.zip`.
+5. Wait for the transfer to finish. The watch resets.
+6. **Rollback:** to return to InfiniTime, repeat steps 3–5 with `infinitime-1.16.1-dfu.zip`.
+
+**Recovery if the watch does not come back:** hold the button until the logo turns red. This loads the
+stock recovery firmware, which accepts Bluetooth updates. Then install `infinitime-1.16.1-dfu.zip` as in
+step 6.
+
+**Known gap:** Pinedog does not yet confirm its own boot. The bootloader may therefore roll back to
+InfiniTime on the next reset. Check that Pinedog still runs after a reset before you rely on it.
+
 ## What is not verified
 
 Everything below is still to be checked on a real watch:
