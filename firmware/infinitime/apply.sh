@@ -30,6 +30,14 @@ grep -q '^#define configTOTAL_HEAP_SIZE[[:space:]]*(1024 \* 40)$' "$heap" \
   || { echo "unexpected configTOTAL_HEAP_SIZE in $heap" >&2; exit 1; }
 sed -i 's/^\(#define configTOTAL_HEAP_SIZE[[:space:]]*\)(1024 \* 40)$/\1(1024 * 38)/' "$heap"
 
+# Give the MAIN task more stack. Pinedog's Tick runs inside MAIN, and stock MAIN has only
+# 25 words free on the watch (the System Info "MAI" row). Our LittleFS calls push it past
+# that, so it overflows and the watchdog resets the watch. 350 -> 500 words (+600 bytes of heap).
+systemtask="$target/src/systemtask/SystemTask.cpp"
+grep -q 'xTaskCreate(SystemTask::Process, "MAIN", 350, this, 1, &taskHandle)' "$systemtask" \
+  || { echo "unexpected MAIN task creation in $systemtask" >&2; exit 1; }
+sed -i 's/xTaskCreate(SystemTask::Process, "MAIN", 350, this, 1, &taskHandle)/xTaskCreate(SystemTask::Process, "MAIN", 500, this, 1, \&taskHandle)/' "$systemtask"
+
 # Show the dog name on the System Info screen, so the two watches can be told apart.
 # One label, added after the screen is created. Assert each anchor matches exactly once.
 python3 - "$target" <<'PY'
