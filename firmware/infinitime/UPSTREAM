@@ -1,2 +1,4 @@
-InfiniTimeOrg/InfiniTime tag 1.16.1
-commit e172b9b3c447e2b79c45510c751855a090a208b4
+InfiniTimeOrg/InfiniTime branch main
+commit 0ffd888745aa14a67ad7cf9fb77ce45804e1d092
+# Pinned to main, not 1.16.1: main moved the CI toolchain to GCC 15.3 and fixed
+# littlefs logging for it (lfs_config.h). 1.16.1 fails to compile littlefs with the image.

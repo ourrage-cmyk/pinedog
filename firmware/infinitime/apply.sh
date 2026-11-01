@@ -3,7 +3,7 @@
 #
 #   apply.sh <infinitime-dir>
 #
-# The checkout must be InfiniTime at the tag in UPSTREAM, unmodified. The
+# The checkout must be InfiniTime at the commit in UPSTREAM, unmodified. The
 # script copies the Pinedog sources into src/components/pinedog and applies
 # glue.patch, which only touches the handful of existing files that need a hook.
 set -euo pipefail

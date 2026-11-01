@@ -1,6 +1,6 @@
 # InfiniTime port: store-and-sync
 
-A port of the Pinedog logger and sync service into InfiniTime 1.16.1. The
+A port of the Pinedog logger and sync service into InfiniTime (main at 0ffd888). The
 result is a standard MCUboot DFU zip, which installs over Bluetooth on a stock
 PineTime. No SWD and no bootloader changes.
 

@@ -14,11 +14,6 @@ on:
       - 'firmware/infinitime/**'
       - '.github/workflows/infinitime-dfu.yml'
   workflow_dispatch:
-    inputs:
-      apply_patch:
-        description: 'Apply the Pinedog port (set to false to build the pinned InfiniTime unmodified)'
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -45,8 +40,8 @@ jobs:
       - name: Read pinned InfiniTime
         id: pin
         run: |
-          echo "tag=$(sed -n 's/^InfiniTimeOrg\/InfiniTime tag //p' pinedog/firmware/infinitime/UPSTREAM)" >> "$GITHUB_OUTPUT"
           echo "sha=$(sed -n 's/^commit //p' pinedog/firmware/infinitime/UPSTREAM)" >> "$GITHUB_OUTPUT"
+          echo "tag=main-$(sed -n 's/^commit //p' pinedog/firmware/infinitime/UPSTREAM | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout InfiniTime at the pinned commit
         uses: actions/checkout@v4
@@ -58,7 +53,6 @@ jobs:
           fetch-depth: 1
 
       - name: Apply the Pinedog port
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.apply_patch }}
         run: |
           git config --global --add safe.directory '*'
           bash pinedog/firmware/infinitime/apply.sh infinitime
