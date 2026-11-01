@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "bluetooth_confirm": {
-        "title": "Pinedog collar found",
-        "description": "Set up {name}? Its activity records will sync whenever the collar is in range."
+        "title": "Collar found",
+        "description": "Set up {name}? Its activity will be tracked whenever the collar is in range. Stock InfiniTime needs no pairing; custom firmware asks you to pair next."
       },
       "pair": {
         "title": "Pair the collar",

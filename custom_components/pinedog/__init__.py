@@ -1,23 +1,26 @@
-"""Pinedog: pulls motion records from a PineTime collar watch over Bluetooth."""
+"""Pinedog: dog activity from a PineTime collar, on custom firmware or stock InfiniTime."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Union
 
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import BluetoothScanningMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .const import FIRMWARE_PINEDOG, FIRMWARE_STOCK
 from .coordinator import PinedogCoordinator
 from .protocol import SERVICE_UUID
+from .stock_coordinator import StockCoordinator
 
 PLATFORMS = ["sensor", "binary_sensor"]
 
 
 @dataclass
 class PinedogRuntime:
-    coordinator: PinedogCoordinator
+    coordinator: Union[PinedogCoordinator, StockCoordinator]
 
 
 type PinedogConfigEntry = ConfigEntry[PinedogRuntime]
@@ -25,15 +28,23 @@ type PinedogConfigEntry = ConfigEntry[PinedogRuntime]
 
 async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> bool:
     address: str = entry.data["address"]
-    coordinator = PinedogCoordinator(hass, address, entry.entry_id)
-    await coordinator.async_load()
+    if entry.data.get("firmware", FIRMWARE_PINEDOG) == FIRMWARE_STOCK:
+        coordinator: Union[PinedogCoordinator, StockCoordinator] = StockCoordinator(
+            hass, address, entry.entry_id
+        )
+        # Advertisements come many times a second; the coordinator's schedule gates them.
+        matcher = {"address": address, "connectable": True}
+    else:
+        coordinator = PinedogCoordinator(hass, address, entry.entry_id)
+        matcher = {"address": address, "service_uuid": SERVICE_UUID}
 
+    await coordinator.async_load()
     entry.runtime_data = PinedogRuntime(coordinator)
     entry.async_on_unload(
         bluetooth.async_register_callback(
             hass,
             coordinator.handle_advertisement,
-            {"address": address, "service_uuid": SERVICE_UUID},
+            matcher,
             BluetoothScanningMode.PASSIVE,
         )
     )

@@ -252,3 +252,7 @@ GitHub release, so each version needs a tag with the same number:
 | `docs/DESIGN.md` | System design. |
 | `docs/FIRMWARE.md` | Firmware reference and known gaps. |
 | `docs/RESEARCH.md` | Notes on storage and the design choices behind them. |
+
+## Pinedog (stock InfiniTime collar)
+
+If your collar runs unmodified InfiniTime, no flashing or pairing is needed. See [docs/STOCK_INFINITIME.md](docs/STOCK_INFINITIME.md) for the Home Assistant setup, the Raspberry Pi Bluetooth setup, and what the watch can and cannot measure.

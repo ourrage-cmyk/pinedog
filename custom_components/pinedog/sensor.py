@@ -8,9 +8,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .const import FIRMWARE_STOCK
 from .coordinator import PinedogCoordinator
 from .entity import PinedogEntity
 
+PINEDOG_ONLY = {"walking", "pending"}
 BASELINE_OPTIONS = ["learning", "below", "normal", "above"]
 
 
@@ -18,8 +20,8 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: PinedogCoordinator = entry.runtime_data.coordinator
-    async_add_entities(
-        [
+    stock = entry.data.get("firmware") == FIRMWARE_STOCK
+    entities = [
             PinedogMinutesSensor(coordinator, entry, "active", "Active time today", "active_minutes"),
             PinedogMinutesSensor(coordinator, entry, "sedentary", "Sedentary time today", "sedentary_minutes"),
             PinedogMinutesSensor(coordinator, entry, "walking", "Walking time today", "walking_minutes"),
@@ -27,12 +29,18 @@ async def async_setup_entry(
             PinedogWearSensor(coordinator, entry),
             PinedogBaselineSensor(coordinator, entry),
             PinedogBaselinePercentSensor(coordinator, entry),
+            PinedogLongTermPercentSensor(coordinator, entry),
+            PinedogLongTermDaysSensor(coordinator, entry),
             PinedogBaselineConfidenceSensor(coordinator, entry),
             PinedogLastSyncSensor(coordinator, entry),
             PinedogBatterySensor(coordinator, entry),
             PinedogPendingSensor(coordinator, entry),
             PinedogLastErrorSensor(coordinator, entry),
-        ]
+    ]
+    # Stock firmware cannot tell walking from other activity, and has no record queue.
+    async_add_entities(
+        e for e in entities
+        if not (stock and e.unique_id.removeprefix(f"{entry.entry_id}_") in PINEDOG_ONLY)
     )
 
 
@@ -101,13 +109,42 @@ class PinedogBaselineSensor(PinedogEntity, SensorEntity):
         }
 
 
+class PinedogLongTermPercentSensor(PinedogEntity, SensorEntity):
+    """Today against the long-term usual at the same hours of the week. Never resets."""
+
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:chart-timeline-variant"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "longterm_percent", "Activity vs long-term usual")
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.data.longterm_vs_usual_pct
+
+
+class PinedogLongTermDaysSensor(PinedogEntity, SensorEntity):
+    _attr_native_unit_of_measurement = "days"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:school"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "longterm_days", "Long-term days learned")
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.data.longterm_days
+
+
 class PinedogBaselinePercentSensor(PinedogEntity, SensorEntity):
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:percent"
 
     def __init__(self, coordinator, entry) -> None:
-        super().__init__(coordinator, entry, "baseline_percent", "Activity vs baseline percent")
+        super().__init__(coordinator, entry, "baseline_percent", "Activity vs 14-day usual")
 
     @property
     def native_value(self) -> int | None:
