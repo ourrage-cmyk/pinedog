@@ -38,6 +38,18 @@ grep -q 'xTaskCreate(SystemTask::Process, "MAIN", 350, this, 1, &taskHandle)' "$
   || { echo "unexpected MAIN task creation in $systemtask" >&2; exit 1; }
 sed -i 's/xTaskCreate(SystemTask::Process, "MAIN", 350, this, 1, &taskHandle)/xTaskCreate(SystemTask::Process, "MAIN", 500, this, 1, \&taskHandle)/' "$systemtask"
 
+# Slim the image. Only the user apps and watch faces listed here are compiled in; the core
+# screens (Settings, System Info, Firmware update) are not in these lists and stay. Set as
+# normal variables at the top of the apps CMakeLists, which the upstream if(DEFINED) reads.
+apps_cm="$target/src/displayapp/apps/CMakeLists.txt"
+grep -q '^if(DEFINED ENABLE_USERAPPS)' "$apps_cm" \
+  || { echo "unexpected apps CMakeLists in $apps_cm" >&2; exit 1; }
+{
+  printf '%s\n' 'set(ENABLE_USERAPPS "Apps::Steps, Apps::Timer, Apps::Alarm, Apps::StopWatch")'
+  printf '%s\n' 'set(ENABLE_WATCHFACES "WatchFace::Digital")'
+  cat "$apps_cm"
+} > "$apps_cm.tmp" && mv "$apps_cm.tmp" "$apps_cm"
+
 # Show the dog name on the System Info screen, so the two watches can be told apart.
 # One label, added after the screen is created. Assert each anchor matches exactly once.
 python3 - "$target" <<'PY'
