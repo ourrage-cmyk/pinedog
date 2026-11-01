@@ -14,7 +14,7 @@ from bleak_retry_connector import establish_connection
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 
-from .motion import BATTERY_LEVEL_UUID, MOTION_VALUES_UUID, decode_battery, decode_motion
+from .stock_motion import BATTERY_LEVEL_UUID, MOTION_VALUES_UUID, decode_battery, decode_motion
 
 
 @dataclass

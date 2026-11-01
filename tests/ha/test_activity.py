@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "custom_components" / "pinedog"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "custom_components" / "woofmetric"))
 
 from activity import (  # noqa: E402
     LIGHT, REST, RUN, WALK, RECORD_SIZE, DailyTotals, Record,

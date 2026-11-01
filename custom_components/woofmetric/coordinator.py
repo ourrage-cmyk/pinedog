@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import logging
 
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
@@ -12,7 +12,9 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .activity import Baseline, DailyTotals, Record, compute_baseline, daily_totals
+from .longterm import LongTerm
+from .storage import STORE_VERSION, WoofStore
+from .activity import NOT_WORN, Baseline, DailyTotals, Record, compute_baseline, daily_totals
 from .transfer import FUTURE_SLACK_MINUTES
 from .protocol import sync_requested
 from .schedule import should_attempt
@@ -21,13 +23,13 @@ from .transfer import IncompleteTransfer, TransferResult
 
 _LOGGER = logging.getLogger(__name__)
 
-STORE_VERSION = 1
+SHORT_TERM_DAYS = 14
 KEEP_DAYS = 90  # the baseline reads up to WINDOW_DAYS; keep a margin
 LOW_BATTERY_PCT = 20
 
 
 @dataclass
-class PinedogData:
+class WoofmetricData:
     today: DailyTotals | None = None
     baseline: Baseline = field(default_factory=lambda: Baseline("learning", None, None, 0.0, 0))
     last_sync: datetime | None = None
@@ -38,6 +40,9 @@ class PinedogData:
     pending: int = 0
     dropped_corrupt: int = 0
     dropped_unplaced: int = 0
+    in_range: bool | None = None  # stock firmware only: the last poll reached the collar
+    longterm_vs_usual_pct: float | None = None
+    longterm_days: int = 0
 
     @property
     def low_battery(self) -> bool:
@@ -52,12 +57,13 @@ class _State:
     days: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
-class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
+class WoofmetricCoordinator(DataUpdateCoordinator[WoofmetricData]):
     def __init__(self, hass: HomeAssistant, address: str, entry_id: str) -> None:
-        super().__init__(hass, _LOGGER, name="Pinedog", update_interval=None)
+        super().__init__(hass, _LOGGER, name="Woofmetric", update_interval=None)
         self.address = address
-        self._store: Store[dict] = Store(hass, STORE_VERSION, f"pinedog.{entry_id}")
+        self._store: Store[dict] = WoofStore(hass, STORE_VERSION, f"woofmetric.{entry_id}")
         self._state = _State()
+        self._longterm = LongTerm()
         self._last_sync: datetime | None = None
         self._last_attempt: datetime | None = None
         self._last_error: str | None = None
@@ -72,6 +78,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
 
     async def async_load(self) -> None:
         raw = await self._store.async_load() or {}
+        self._longterm = LongTerm.from_dict(raw.get("longterm"))
         self._state = _State(
             last_stored_minute=raw.get("last_stored_minute", -1),
             days=raw.get("days", {}),
@@ -93,14 +100,17 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             for key, v in sorted(self._state.days.items())
         ]
 
-    def _build(self) -> PinedogData:
+    def _build(self) -> WoofmetricData:
         history = self._history()
         today_key = dt_util.now().date()
         today = next((d for d in history if d.day == today_key), None)
         base = Baseline("waiting", None, None, 0.0, 0)
         if today is not None:
-            base = compute_baseline(today, history)
-        return PinedogData(
+            # Short-term usual: the last 14 days. The long-term one is kept separately.
+            recent = [d for d in history if (today_key - d.day).days <= SHORT_TERM_DAYS]
+            base = compute_baseline(today, recent)
+        now_local = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
+        return WoofmetricData(
             today=today,
             baseline=base,
             last_sync=self._last_sync,
@@ -111,9 +121,11 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             pending=self._pending,
             dropped_corrupt=self._dropped_corrupt,
             dropped_unplaced=self._dropped_unplaced,
+            longterm_vs_usual_pct=self._longterm.comparison(now_local),
+            longterm_days=self._longterm.days_learned,
         )
 
-    async def _async_update_data(self) -> PinedogData:
+    async def _async_update_data(self) -> WoofmetricData:
         forced, self._force_next = self._force_next, False
         if not forced and not self._attempt_allowed():
             return self._build()
@@ -124,7 +136,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             self._last_error = None
         except Exception as err:  # noqa: BLE001 - keep sensors alive on any BLE error
             self._last_error = str(err) or type(err).__name__
-            _LOGGER.warning("Pinedog sync failed, will retry: %s", self._last_error)
+            _LOGGER.warning("Woofmetric sync failed, will retry: %s", self._last_error)
         finally:
             self._busy = False
         return self._build()
@@ -154,7 +166,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             )
         if result.corrupt or result.unplaced:
             _LOGGER.warning(
-                "Pinedog sync dropped %d corrupt and %d unplaceable records",
+                "Woofmetric sync dropped %d corrupt and %d unplaceable records",
                 result.corrupt,
                 result.unplaced,
             )
@@ -184,6 +196,10 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             cur["sedentary"] += totals.sedentary_minutes
             cur["walking"] += totals.walking_minutes
             cur["motion"] += totals.motion_counts
+        for rec in fresh:
+            worn = 0 if rec.activity_class == NOT_WORN else 60
+            local = dt_util.as_local(datetime.fromtimestamp(rec.minute * 60, tz=timezone.utc)).replace(tzinfo=None)
+            self._longterm.observe(local, rec.counts, worn)
         for key in sorted(self._state.days)[:-KEEP_DAYS]:
             del self._state.days[key]
         if fresh:
@@ -194,6 +210,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
                 "last_stored_minute": self._state.last_stored_minute,
                 "days": self._state.days,
                 "last_sync": self._last_sync.isoformat(),
+                "longterm": self._longterm.to_dict(),
             }
         )
 

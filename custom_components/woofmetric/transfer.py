@@ -1,4 +1,4 @@
-"""One sync with a Pinedog watch, as pure logic.
+"""One sync with a Woofmetric watch, as pure logic.
 
 The order of steps is the safety property here: records are persisted before
 the watch is acked, and the watch is acked with a count, so it drops exactly

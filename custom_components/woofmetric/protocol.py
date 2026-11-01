@@ -1,4 +1,4 @@
-"""Wire format for the Pinedog BLE sync.
+"""Wire format for the Woofmetric BLE sync.
 
 Must match firmware/app/src/ble_sync.c, firmware/app/src/store.h and
 firmware/core/minute_summary.c. Pure logic, no Home Assistant imports.
