@@ -7,5 +7,7 @@
 namespace Pinetime {
   namespace Pinedog {
     const char* DogName();
+    /* Last value written to the boot-step register (survives a watchdog reset). */
+    uint32_t LastBootStep();
   }
 }

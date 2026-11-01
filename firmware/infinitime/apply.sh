@@ -43,7 +43,7 @@ assert len(found) == 1, "SystemInfo::CreateScreen1 not found once: %d" % len(fou
 s = pat.sub(lambda m: m.group(0) + """  {
     // Pinedog: the dog name, so two watches can be told apart.
     lv_obj_t* dogLabel = lv_label_create(lv_scr_act(), nullptr);
-    lv_label_set_text(dogLabel, Pinetime::Pinedog::DogName());
+    lv_label_set_text_fmt(dogLabel, "Dog: %s (boot step %u)", Pinetime::Pinedog::DogName(), static_cast<unsigned>(Pinetime::Pinedog::LastBootStep()));
     lv_obj_align(dogLabel, lv_scr_act(), LV_ALIGN_IN_TOP_LEFT, 0, 0);
   }
 """, s, count=1)

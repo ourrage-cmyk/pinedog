@@ -69,6 +69,7 @@ namespace Pinetime {
       void PumpStream();
       void SaveName();
       void LoadName();
+      void OpenStore();
 
       Controllers::FS& fs;
       Controllers::DateTime& dateTime;
@@ -76,6 +77,7 @@ namespace Pinetime {
 
       pd_store store {};
       bool storeReady = false;
+      bool storeOpenTried = false;
       pd_config config {50, 300, 1200, 15, 30};
       pd_summary summary {};
       bool windowOpen = false;

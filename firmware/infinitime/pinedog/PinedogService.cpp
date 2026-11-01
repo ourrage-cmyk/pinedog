@@ -8,6 +8,7 @@
 #include <host/ble_hs_mbuf.h>
 #include <nrf_log.h>
 #include <os/os_mbuf.h>
+#include <nrf.h>
 
 #include "components/battery/BatteryController.h"
 #include "components/datetime/DateTimeController.h"
@@ -24,6 +25,9 @@ namespace Pinetime {
     }
     const char* DogName() {
       return gDogName;
+    }
+    uint32_t LastBootStep() {
+      return NRF_POWER->GPREGRET; // survives a watchdog reset, so it shows where the last boot stopped
     }
   }
 }
@@ -161,6 +165,13 @@ void PinedogService::Init() {
 }
 
 void PinedogService::Start() {
+  // Boot must not depend on the filesystem. The store opens from Tick, a few seconds
+  // after boot, through OpenStore().
+}
+
+void PinedogService::OpenStore() {
+  storeOpenTried = true;
+  NRF_POWER->GPREGRET = 0x10; // before the filesystem work
   pd_fs ops {};
   ops.ctx = &fs;
   ops.append = FsAppend;
@@ -174,10 +185,12 @@ void PinedogService::Start() {
   storeReady = pd_store_open(&store, &ops) == 0;
   if (!storeReady) {
     NRF_LOG_ERROR("pinedog: store open failed");
+    NRF_POWER->GPREGRET = 0x12;
     return;
   }
   statusPending.store(pd_store_pending(&store));
   LoadName();
+  NRF_POWER->GPREGRET = 0x11; // store open and name loaded
 }
 
 void PinedogService::SaveName() {
@@ -313,6 +326,9 @@ void PinedogService::PumpStream() {
 
 void PinedogService::Tick() {
   if (!storeReady) {
+    if (!storeOpenTried && dateTime.Uptime().count() >= 10) {
+      OpenStore();
+    }
     return;
   }
 
