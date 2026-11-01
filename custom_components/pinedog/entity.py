@@ -18,7 +18,7 @@ class PinedogEntity(CoordinatorEntity[PinedogCoordinator]):
         self._attr_name = name
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.data["address"])},
-            "name": "Pinedog collar",
+            "name": entry.data.get("dog_name") or "Pinedog collar",
             "manufacturer": "Pine64",
             "model": "PineTime (dog firmware)",
         }

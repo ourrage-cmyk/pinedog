@@ -88,7 +88,7 @@ class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._firmware = _firmware_for(info)
                 self.context["title_placeholders"] = {"name": info.name or "Collar"}
                 # Neither firmware needs pairing: the InfiniTime port has no bonding.
-                return self._create(self._firmware)
+                return self._create(self._firmware, (user_input.get("dog_name") or "").strip() or None)
 
         # Likely watches first, then the strongest signal.
         ordered = sorted(
@@ -107,6 +107,7 @@ class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 ),
                 vol.Optional("manual_address"): selector.TextSelector(),
+                vol.Optional("dog_name"): selector.TextSelector(),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
@@ -144,9 +145,12 @@ class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={"name": self._discovered.name or "Collar"},
         )
 
-    def _create(self, firmware: str) -> ConfigFlowResult:
+    def _create(self, firmware: str, dog_name: str | None = None) -> ConfigFlowResult:
         assert self._discovered is not None
+        data: dict[str, Any] = {"address": self._discovered.address, "firmware": firmware}
+        if dog_name:
+            data["dog_name"] = dog_name
         return self.async_create_entry(
-            title=self._discovered.name or "Collar",
-            data={"address": self._discovered.address, "firmware": firmware},
+            title=dog_name or self._discovered.name or "Collar",
+            data=data,
         )
