@@ -1,4 +1,4 @@
-"""Entities: steps, activity, battery, connection state and last seen."""
+"""Entities: active and sedentary time, activity score, usual comparison, battery, connection."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE
+from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -24,32 +24,43 @@ from .coordinator import InfiniTimeCoordinator, InfiniTimeData
 
 SENSORS = (
     SensorEntityDescription(
-        key="steps_today",
-        translation_key="steps_today",
-        native_unit_of_measurement="steps",
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:shoe-print",
-    ),
-    SensorEntityDescription(
-        key="steps_last_hour",
-        translation_key="steps_last_hour",
-        native_unit_of_measurement="steps",
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:shoe-print",
-    ),
-    SensorEntityDescription(
-        key="active_intervals_today",
-        translation_key="active_intervals_today",
-        native_unit_of_measurement="intervals",
-        state_class=SensorStateClass.MEASUREMENT,
+        key="active_minutes_today",
+        translation_key="active_minutes_today",
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        state_class=SensorStateClass.TOTAL,
         icon="mdi:run",
     ),
     SensorEntityDescription(
-        key="steps_vs_baseline_pct",
-        translation_key="steps_vs_baseline",
+        key="sedentary_minutes_today",
+        translation_key="sedentary_minutes_today",
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        state_class=SensorStateClass.TOTAL,
+        icon="mdi:sleep",
+    ),
+    SensorEntityDescription(
+        key="activity_score_today",
+        translation_key="activity_score_today",
+        state_class=SensorStateClass.TOTAL,
+        icon="mdi:chart-bar",
+    ),
+    SensorEntityDescription(
+        key="activity_vs_usual_pct",
+        translation_key="activity_vs_usual",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:chart-line",
+    ),
+    SensorEntityDescription(
+        key="usual_status",
+        translation_key="usual_status",
+        icon="mdi:scale-balance",
+    ),
+    SensorEntityDescription(
+        key="learning_days",
+        translation_key="learning_days",
+        native_unit_of_measurement="days",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:school",
     ),
     SensorEntityDescription(
         key="battery_pct",
@@ -57,12 +68,6 @@ SENSORS = (
         device_class=SensorDeviceClass.BATTERY,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="activity",
-        translation_key="activity",
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:vibrate",
     ),
     SensorEntityDescription(
         key="last_seen",
@@ -98,7 +103,7 @@ class _InfiniTimeEntity(CoordinatorEntity[InfiniTimeCoordinator]):
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title or "InfiniTime",
+            "name": entry.title or "Dog collar",
             "manufacturer": "PINETIME",
             "model": "InfiniTime (stock firmware)",
         }

@@ -1,30 +1,51 @@
-# Home Assistant entities for stock InfiniTime
+# Home Assistant entities for a dog collar on stock InfiniTime
+
+Goal: per dog, active time, sedentary time, a daily activity score, and whether the day was more or less than that dog's usual. The comparison improves as data builds up.
+
+## What the watch can and cannot give
+
+- The watch sends only what is asked for over BLE. It keeps no per-minute history for BLE.
+- Home Assistant sees the watch only while it is connected. Each poll samples motion for 60 s. That sample stands for the time since the previous poll, capped at 10 min. Longer gaps count as unknown, not sedentary.
+- Accuracy therefore depends on how often Home Assistant connects. The default is every 5 minutes. Between polls the dog's time is unknown.
+- Off-body time is not detected. A watch taken off counts as sedentary until the next gap.
 
 Source data (InfiniTime `main`, read October 2026):
 
-| Characteristic | UUID | Format | Notes |
+| Characteristic | UUID | Format | Use |
 |---|---|---|---|
-| Step count | `00030100-78fc-48fe-8e23-433b3a1942d0` | uint32 LE, read + notify | Cumulative counter |
-| Motion values | `00030200-78fc-48fe-8e23-433b3a1942d0` | int16 x, y, z LE, read + notify | Raw accelerometer, scale unverified |
-| Battery level | `00002a19-0000-1000-8000-00805f9b34fb` | uint8 percent, read + notify | Standard Battery service |
+| Motion values | `00030200-78fc-48fe-8e23-433b3a1942d0` | int16 x, y, z LE, read + notify | Activity index per poll |
+| Battery level | `00002a19-0000-1000-8000-00805f9b34fb` | uint8 percent, read | Battery |
 
-Not exposed over BLE by stock InfiniTime: charging state, heart rate (off by design), per-minute history.
+## Headline entities
 
-| Entity | Type | Unit | Device class | How it is calculated | Source |
-|---|---|---|---|---|---|
-| Steps today | sensor | steps | none (total) | Sum of step deltas since local midnight. A lower reading counts as a counter reset | Step count |
-| Steps last hour | sensor | steps | none | Step count now minus the reading about 60 min ago, from stored polls. Resolution is one poll interval | Step count, history |
-| Active intervals today | sensor | intervals | none | Count of 15-min poll intervals with at least 30 steps. Not minutes: polling cannot see minutes | Step count, history |
-| Steps vs 7-day baseline | sensor | % | none | Today's steps divided by the median of the last 7 full days, times 100. Unknown until 3 days exist | Step count, history |
-| Motion index | sensor | none | none | Standard deviation of the acceleration magnitude over a 5 s sample per poll. Relative only | Motion values |
-| Battery | sensor | % | battery | Battery level as reported | Battery level |
-| Connected | binary_sensor | none | connectivity | On if the last poll reached the watch | Connection result |
-| Last seen | sensor | none | timestamp | Time of the last successful poll | Connection result |
+| Entity | Type | Unit | Device class | How it is calculated |
+|---|---|---|---|---|
+| Active time today | sensor | min | none (total) | Sum of poll intervals whose motion index is at or above the dog's active threshold |
+| Sedentary time today | sensor | min | none (total) | Sum of poll intervals below the threshold. Gaps over 10 min are excluded |
+| Activity score today | sensor | none | none (total) | Sum of motion index × seconds across the day. A single number for how much the dog moved |
+| Activity vs usual | sensor | % | none | Today's score so far as a percent of the median score at the same hour over the past 14 days |
+| Compared to usual | sensor | none | none | `more` above 115 %, `less` below 85 %, otherwise `typical`. `learning` until 3 days exist |
+| Days learned | sensor | days | none | Number of past days (up to 14) that have data for the comparison. Confidence grows with this |
+| Battery | sensor | % | battery | Battery level as reported |
+| Connected | binary_sensor | none | connectivity | On if the last poll reached the watch |
+| Last seen | sensor | none | timestamp | Time of the last successful poll |
 
-Dropped, with reason:
+## How the dog's own thresholds are learned
 
-- Charging: no standard characteristic. Would need an InfiniTime change.
+- Active vs sedentary uses the dog's own history, not fixed human cut-offs. The threshold is the 30th percentile of the dog's motion index over the last 14 days, so the quietest 30 % of its history counts as sedentary.
+- Until 30 intervals exist, a fixed placeholder of 50 is used. The placeholder is not tuned on real dog data.
+- The comparison uses the same hour of day, because a dog's day is not flat. Hour-of-day history is what makes it "usual" for this dog at this time.
+
+## Dropped
+
+- Steps: a human pedometer is not reliable on a dog. Steps are not read.
+- Charging: not exposed by stock InfiniTime over BLE.
 - Heart rate: off by design.
-- Minute-level active time: needs per-minute history on the watch, which stock InfiniTime does not keep for BLE.
 
-Unverified on hardware: notification rate of the motion characteristic, whether the step counter resets on watch reboot, and whether a phone app blocks the connection.
+## Unverified on hardware
+
+- The motion characteristic's notification and read behaviour, and its sample rate.
+- The absolute scale of the motion index. It is only compared against the dog's own history.
+- Whether a connection succeeds while a phone is also connected.
+- Battery use at the default 5-minute poll with a 60 s sample.
+- The 30 % threshold, the 115 % and 85 % bands, and the 50 placeholder. These need real data to tune.
