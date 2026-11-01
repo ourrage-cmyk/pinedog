@@ -37,7 +37,7 @@ import sys
 path = sys.argv[1] + "/src/displayapp/screens/SystemInfo.cpp"
 s = open(path).read()
 import re
-pat = re.compile(r"void SystemInfo::CreateScreen1\(\)\s*\{\n")
+pat = re.compile(r"SystemInfo::CreateScreen1\(\)\s*\{\n")
 found = pat.findall(s)
 assert len(found) == 1, "SystemInfo::CreateScreen1 not found once: %d" % len(found)
 s = pat.sub(lambda m: m.group(0) + """  {
