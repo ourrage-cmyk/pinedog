@@ -70,6 +70,24 @@ jobs:
       - name: Report flash and RAM use
         run: |
           arm-none-eabi-size infinitime/build/src/pinetime-mcuboot-app.out || true
+          arm-none-eabi-nm --size-sort -S --radix=d infinitime/build/src/pinetime-mcuboot-app.out | awk '$3 ~ /[bBdD]/' | tail -n 25 || true
+
+      - name: Checkout stock InfiniTime for a RAM baseline (diagnostic)
+        uses: actions/checkout@v4
+        with:
+          repository: InfiniTimeOrg/InfiniTime
+          ref: ${{ steps.pin.outputs.sha }}
+          path: infinitime-stock
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Build stock app for a RAM baseline (diagnostic)
+        continue-on-error: true
+        env:
+          SOURCES_DIR: ${{ github.workspace }}/infinitime-stock
+        run: |
+          /opt/build.sh all || true
+          arm-none-eabi-size infinitime-stock/build/src/pinetime-mcuboot-app.out || true
 
       - name: Name the DFU zip
         run: |
