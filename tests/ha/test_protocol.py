@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 
 # Load the pure modules without running the package __init__, which needs Home Assistant.
-PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "woofmetric"
-_pkg = types.ModuleType("woofmetric")
+PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "pinedog"
+_pkg = types.ModuleType("pinedog")
 _pkg.__path__ = [str(PKG_DIR)]
-sys.modules["woofmetric"] = _pkg
+sys.modules["pinedog"] = _pkg
 
-from woofmetric.protocol import (  # noqa: E402
+from pinedog.protocol import (  # noqa: E402
     BATTERY_UNKNOWN, BOOT_SHIFT, END_MARKER, FLAG_CHARGING, FLAG_CLOCK_SYNCED,
     UNSYNCED_FLAG, crc8, decode_chunk, decode_end_count, decode_status, encode_u32,
     is_end_marker,
@@ -93,7 +93,7 @@ def test_chunk_rejects_partial_record():
 
 
 def test_sync_request_flag_in_manufacturer_data():
-    from woofmetric.protocol import sync_requested
+    from pinedog.protocol import sync_requested
 
     assert sync_requested({0xFFFF: bytes([0x01])})
     assert not sync_requested({0xFFFF: bytes([0x00])})

@@ -1,6 +1,6 @@
 """Stock InfiniTime collar: polls while in range, keeps the day log, feeds the same entities.
 
-Exposes the same surface as WoofmetricCoordinator (data, async_load, handle_advertisement),
+Exposes the same surface as PinedogCoordinator (data, async_load, handle_advertisement),
 so the sensors and binary sensors do not need to know which firmware is running.
 """
 
@@ -17,7 +17,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .activity import Baseline, compute_baseline
-from .coordinator import WoofmetricData
+from .coordinator import PinedogData
 from .schedule import should_attempt
 from .stock_ble import async_read_watch
 from .stock_motion import DayLog, MAX_INTERVAL_S, activity_index
@@ -33,11 +33,11 @@ RETRY_INTERVAL = timedelta(minutes=2)
 POLL_INTERVAL = timedelta(seconds=MAX_INTERVAL_S)
 
 
-class StockCoordinator(DataUpdateCoordinator[WoofmetricData]):
+class StockCoordinator(DataUpdateCoordinator[PinedogData]):
     def __init__(self, hass: HomeAssistant, address: str, entry_id: str) -> None:
-        super().__init__(hass, _LOGGER, name="Woofmetric stock", update_interval=POLL_INTERVAL)
+        super().__init__(hass, _LOGGER, name="Pinedog stock", update_interval=POLL_INTERVAL)
         self.address = address
-        self._store = WoofStore(hass, STORE_VERSION, f"woofmetric_stock.{entry_id}")
+        self._store = WoofStore(hass, STORE_VERSION, f"pinedog_stock.{entry_id}")
         self.log = DayLog()
         self._last_sync: datetime | None = None
         self._last_attempt: datetime | None = None
@@ -52,7 +52,7 @@ class StockCoordinator(DataUpdateCoordinator[WoofmetricData]):
         self._last_sync = datetime.fromisoformat(last) if last else None
         self.data = self._build()
 
-    async def _async_update_data(self) -> WoofmetricData:
+    async def _async_update_data(self) -> PinedogData:
         if self._busy:
             return self._build()
         self._busy = True
@@ -79,7 +79,7 @@ class StockCoordinator(DataUpdateCoordinator[WoofmetricData]):
         )
         return self._build()
 
-    def _build(self) -> WoofmetricData:
+    def _build(self) -> PinedogData:
         history = self.log.daily_totals()
         today_key = dt_util.now().date()
         today = next((d for d in history if d.day == today_key), None)
@@ -88,7 +88,7 @@ class StockCoordinator(DataUpdateCoordinator[WoofmetricData]):
             recent = [d for d in history if (today_key - d.day).days <= SHORT_TERM_DAYS]
             base = compute_baseline(today, recent)
         now_local = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
-        return WoofmetricData(
+        return PinedogData(
             today=today,
             baseline=base,
             last_sync=self._last_sync,

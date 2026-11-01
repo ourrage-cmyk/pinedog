@@ -1,6 +1,6 @@
-# Woofmetric on stock InfiniTime
+# Pinedog on stock InfiniTime
 
-Woofmetric tracks a dog's active time, sedentary time, and a daily activity score from a PineTime collar. This page covers the stock InfiniTime path: the watch keeps its normal firmware, nothing is flashed, and nothing is paired.
+Pinedog tracks a dog's active time, sedentary time, and a daily activity score from a PineTime collar. This page covers the stock InfiniTime path: the watch keeps its normal firmware, nothing is flashed, and nothing is paired.
 
 Status: **host-tested only.** The Bluetooth code has not run against a real collar on a Raspberry Pi. A separate test is checking that from a laptop. Treat the first install as a test.
 
@@ -40,9 +40,9 @@ Placeholders that need real dog data to tune: the 50 starting threshold, the 30%
 
 ## Install (manual)
 
-This integration is a HACS custom repository. Add `https://github.com/ourrage-cmyk/pinedog` as a custom repository of type Integration, then install Woofmetric and restart Home Assistant.
+This integration is a HACS custom repository. Add `https://github.com/ourrage-cmyk/pinedog` as a custom repository of type Integration, then install Pinedog and restart Home Assistant.
 
-Manual install, if you prefer: copy `custom_components/woofmetric/` into your Home Assistant config folder, then restart.
+Manual install, if you prefer: copy `custom_components/pinedog/` into your Home Assistant config folder, then restart.
 
 Then keep the collar on and near the Pi. A "Collar found" card appears under Settings, Devices and services. Confirm it.
 

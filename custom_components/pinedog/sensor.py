@@ -9,8 +9,8 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import FIRMWARE_STOCK
-from .coordinator import WoofmetricCoordinator
-from .entity import WoofmetricEntity
+from .coordinator import PinedogCoordinator
+from .entity import PinedogEntity
 
 PINEDOG_ONLY = {"walking", "pending"}
 BASELINE_OPTIONS = ["learning", "below", "normal", "above"]
@@ -19,23 +19,23 @@ BASELINE_OPTIONS = ["learning", "below", "normal", "above"]
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    coordinator: WoofmetricCoordinator = entry.runtime_data.coordinator
+    coordinator: PinedogCoordinator = entry.runtime_data.coordinator
     stock = entry.data.get("firmware") == FIRMWARE_STOCK
     entities = [
-            WoofmetricMinutesSensor(coordinator, entry, "active", "Active time today", "active_minutes"),
-            WoofmetricMinutesSensor(coordinator, entry, "sedentary", "Sedentary time today", "sedentary_minutes"),
-            WoofmetricMinutesSensor(coordinator, entry, "walking", "Walking time today", "walking_minutes"),
-            WoofmetricMotionSensor(coordinator, entry),
-            WoofmetricWearSensor(coordinator, entry),
-            WoofmetricBaselineSensor(coordinator, entry),
-            WoofmetricBaselinePercentSensor(coordinator, entry),
-            WoofmetricLongTermPercentSensor(coordinator, entry),
-            WoofmetricLongTermDaysSensor(coordinator, entry),
-            WoofmetricBaselineConfidenceSensor(coordinator, entry),
-            WoofmetricLastSyncSensor(coordinator, entry),
-            WoofmetricBatterySensor(coordinator, entry),
-            WoofmetricPendingSensor(coordinator, entry),
-            WoofmetricLastErrorSensor(coordinator, entry),
+            PinedogMinutesSensor(coordinator, entry, "active", "Active time today", "active_minutes"),
+            PinedogMinutesSensor(coordinator, entry, "sedentary", "Sedentary time today", "sedentary_minutes"),
+            PinedogMinutesSensor(coordinator, entry, "walking", "Walking time today", "walking_minutes"),
+            PinedogMotionSensor(coordinator, entry),
+            PinedogWearSensor(coordinator, entry),
+            PinedogBaselineSensor(coordinator, entry),
+            PinedogBaselinePercentSensor(coordinator, entry),
+            PinedogLongTermPercentSensor(coordinator, entry),
+            PinedogLongTermDaysSensor(coordinator, entry),
+            PinedogBaselineConfidenceSensor(coordinator, entry),
+            PinedogLastSyncSensor(coordinator, entry),
+            PinedogBatterySensor(coordinator, entry),
+            PinedogPendingSensor(coordinator, entry),
+            PinedogLastErrorSensor(coordinator, entry),
     ]
     # Stock firmware cannot tell walking from other activity, and has no record queue.
     async_add_entities(
@@ -44,7 +44,7 @@ async def async_setup_entry(
     )
 
 
-class WoofmetricMinutesSensor(WoofmetricEntity, SensorEntity):
+class PinedogMinutesSensor(PinedogEntity, SensorEntity):
     _attr_native_unit_of_measurement = "min"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -61,7 +61,7 @@ class WoofmetricMinutesSensor(WoofmetricEntity, SensorEntity):
         return getattr(today, self._field)
 
 
-class WoofmetricMotionSensor(WoofmetricEntity, SensorEntity):
+class PinedogMotionSensor(PinedogEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:run"
 
@@ -74,7 +74,7 @@ class WoofmetricMotionSensor(WoofmetricEntity, SensorEntity):
         return today.motion_counts if today else 0
 
 
-class WoofmetricWearSensor(WoofmetricEntity, SensorEntity):
+class PinedogWearSensor(PinedogEntity, SensorEntity):
     _attr_native_unit_of_measurement = "min"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:watch-variant"
@@ -88,7 +88,7 @@ class WoofmetricWearSensor(WoofmetricEntity, SensorEntity):
         return today.active_minutes + today.sedentary_minutes if today else 0
 
 
-class WoofmetricBaselineSensor(WoofmetricEntity, SensorEntity):
+class PinedogBaselineSensor(PinedogEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = BASELINE_OPTIONS
     _attr_icon = "mdi:chart-line"
@@ -109,7 +109,7 @@ class WoofmetricBaselineSensor(WoofmetricEntity, SensorEntity):
         }
 
 
-class WoofmetricLongTermPercentSensor(WoofmetricEntity, SensorEntity):
+class PinedogLongTermPercentSensor(PinedogEntity, SensorEntity):
     """Today against the long-term usual at the same hours of the week. Never resets."""
 
     _attr_native_unit_of_measurement = "%"
@@ -124,7 +124,7 @@ class WoofmetricLongTermPercentSensor(WoofmetricEntity, SensorEntity):
         return self.coordinator.data.longterm_vs_usual_pct
 
 
-class WoofmetricLongTermDaysSensor(WoofmetricEntity, SensorEntity):
+class PinedogLongTermDaysSensor(PinedogEntity, SensorEntity):
     _attr_native_unit_of_measurement = "days"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -138,7 +138,7 @@ class WoofmetricLongTermDaysSensor(WoofmetricEntity, SensorEntity):
         return self.coordinator.data.longterm_days
 
 
-class WoofmetricBaselinePercentSensor(WoofmetricEntity, SensorEntity):
+class PinedogBaselinePercentSensor(PinedogEntity, SensorEntity):
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:percent"
@@ -152,7 +152,7 @@ class WoofmetricBaselinePercentSensor(WoofmetricEntity, SensorEntity):
         return None if percent is None else round(percent)
 
 
-class WoofmetricBaselineConfidenceSensor(WoofmetricEntity, SensorEntity):
+class PinedogBaselineConfidenceSensor(PinedogEntity, SensorEntity):
     _attr_native_unit_of_measurement = "%"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:school"
@@ -165,7 +165,7 @@ class WoofmetricBaselineConfidenceSensor(WoofmetricEntity, SensorEntity):
         return round(100 * self.coordinator.data.baseline.confidence)
 
 
-class WoofmetricLastSyncSensor(WoofmetricEntity, SensorEntity):
+class PinedogLastSyncSensor(PinedogEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -177,7 +177,7 @@ class WoofmetricLastSyncSensor(WoofmetricEntity, SensorEntity):
         return self.coordinator.data.last_sync
 
 
-class WoofmetricBatterySensor(WoofmetricEntity, SensorEntity):
+class PinedogBatterySensor(PinedogEntity, SensorEntity):
     """Charge level, shown as a reminder to put the collar on the charger."""
 
     _attr_device_class = SensorDeviceClass.BATTERY
@@ -191,7 +191,7 @@ class WoofmetricBatterySensor(WoofmetricEntity, SensorEntity):
         return self.coordinator.data.battery_pct
 
 
-class WoofmetricPendingSensor(WoofmetricEntity, SensorEntity):
+class PinedogPendingSensor(PinedogEntity, SensorEntity):
     """Records the watch still holds that Home Assistant has not stored yet."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -206,7 +206,7 @@ class WoofmetricPendingSensor(WoofmetricEntity, SensorEntity):
         return self.coordinator.data.pending
 
 
-class WoofmetricLastErrorSensor(WoofmetricEntity, SensorEntity):
+class PinedogLastErrorSensor(PinedogEntity, SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:bluetooth-off"
 

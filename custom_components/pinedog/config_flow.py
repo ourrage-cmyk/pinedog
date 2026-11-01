@@ -19,7 +19,7 @@ from .sync import async_pair
 _LOGGER = logging.getLogger(__name__)
 
 
-class WoofmetricConfigFlow(ConfigFlow, domain=DOMAIN):
+class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
@@ -61,7 +61,7 @@ class WoofmetricConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 await async_pair(self.hass, self._discovered.address)
             except Exception as err:  # noqa: BLE001 - any failure means the user retries
-                _LOGGER.warning("Woofmetric pairing failed: %s", err)
+                _LOGGER.warning("Pinedog pairing failed: %s", err)
                 errors["base"] = "pair_failed"
             else:
                 return self._create(FIRMWARE_PINEDOG)

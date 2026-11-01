@@ -16,14 +16,14 @@ from pathlib import Path
 
 import pytest
 
-PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "woofmetric"
-_pkg = types.ModuleType("woofmetric")
+PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "pinedog"
+_pkg = types.ModuleType("pinedog")
 _pkg.__path__ = [str(PKG_DIR)]
-sys.modules["woofmetric"] = _pkg
+sys.modules["pinedog"] = _pkg
 
-from woofmetric.activity import LIGHT, NOT_WORN, WALK, daily_totals  # noqa: E402
-from woofmetric.protocol import decode_chunk  # noqa: E402
-from woofmetric.transfer import run_transfer  # noqa: E402
+from pinedog.activity import LIGHT, NOT_WORN, WALK, daily_totals  # noqa: E402
+from pinedog.protocol import decode_chunk  # noqa: E402
+from pinedog.transfer import run_transfer  # noqa: E402
 
 FIXTURE = Path(__file__).parent / "fixtures" / "wire_v2.bin"
 NOW_UNIX = 1_700_000_000

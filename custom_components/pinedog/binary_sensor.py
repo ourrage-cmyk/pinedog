@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import FIRMWARE_STOCK
-from .entity import WoofmetricEntity
+from .entity import PinedogEntity
 
 
 async def async_setup_entry(
@@ -17,17 +17,17 @@ async def async_setup_entry(
     coordinator = entry.runtime_data.coordinator
     if entry.data.get("firmware") == FIRMWARE_STOCK:
         # Stock firmware does not report charging, so only the low battery and range sensors apply.
-        async_add_entities([WoofmetricLowBatterySensor(coordinator, entry), WoofmetricInRangeSensor(coordinator, entry)])
+        async_add_entities([PinedogLowBatterySensor(coordinator, entry), PinedogInRangeSensor(coordinator, entry)])
         return
     async_add_entities(
         [
-            WoofmetricChargingSensor(coordinator, entry),
-            WoofmetricLowBatterySensor(coordinator, entry),
+            PinedogChargingSensor(coordinator, entry),
+            PinedogLowBatterySensor(coordinator, entry),
         ]
     )
 
 
-class WoofmetricChargingSensor(WoofmetricEntity, BinarySensorEntity):
+class PinedogChargingSensor(PinedogEntity, BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.BATTERY_CHARGING
 
     def __init__(self, coordinator, entry) -> None:
@@ -38,7 +38,7 @@ class WoofmetricChargingSensor(WoofmetricEntity, BinarySensorEntity):
         return self.coordinator.data.charging
 
 
-class WoofmetricLowBatterySensor(WoofmetricEntity, BinarySensorEntity):
+class PinedogLowBatterySensor(PinedogEntity, BinarySensorEntity):
     """On when the battery is at or below the low threshold and not charging."""
 
     _attr_device_class = BinarySensorDeviceClass.BATTERY
@@ -51,7 +51,7 @@ class WoofmetricLowBatterySensor(WoofmetricEntity, BinarySensorEntity):
         return self.coordinator.data.low_battery
 
 
-class WoofmetricInRangeSensor(WoofmetricEntity, BinarySensorEntity):
+class PinedogInRangeSensor(PinedogEntity, BinarySensorEntity):
     """Stock firmware only: on when the last poll reached the collar."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY

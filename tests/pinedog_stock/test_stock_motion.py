@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "woofmetric"
-_pkg = types.ModuleType("woofmetric")
+PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "pinedog"
+_pkg = types.ModuleType("pinedog")
 _pkg.__path__ = [str(PKG_DIR)]
-sys.modules["woofmetric"] = _pkg
+sys.modules["pinedog"] = _pkg
 
-from woofmetric.activity import compute_baseline  # noqa: E402
-from woofmetric.stock_motion import (  # noqa: E402
+from pinedog.activity import compute_baseline  # noqa: E402
+from pinedog.stock_motion import (  # noqa: E402
     BATTERY_LEVEL_UUID,
     DEFAULT_ACTIVE_THRESHOLD,
     MAX_INTERVAL_S,

@@ -1,4 +1,4 @@
-# Woofmetric entities on stock InfiniTime
+# Pinedog entities on stock InfiniTime
 
 Goal: per dog, active time, sedentary time, a daily activity score, and whether today is more or less than that dog's usual. The long-term usual keeps improving for as long as the dog is tracked.
 

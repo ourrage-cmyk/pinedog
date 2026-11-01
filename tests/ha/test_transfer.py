@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 
 # Load the pure modules without running the package __init__, which needs Home Assistant.
-PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "woofmetric"
-_pkg = types.ModuleType("woofmetric")
+PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "pinedog"
+_pkg = types.ModuleType("pinedog")
 _pkg.__path__ = [str(PKG_DIR)]
-sys.modules["woofmetric"] = _pkg
+sys.modules["pinedog"] = _pkg
 
-from woofmetric.protocol import BOOT_SHIFT, UNSYNCED_FLAG, crc8  # noqa: E402
-from woofmetric.schedule import RETRY_INTERVAL, SUCCESS_INTERVAL, should_attempt  # noqa: E402
-from woofmetric.transfer import ClockError, place_unsynced, run_transfer  # noqa: E402
-from woofmetric.protocol import decode_status  # noqa: E402
+from pinedog.protocol import BOOT_SHIFT, UNSYNCED_FLAG, crc8  # noqa: E402
+from pinedog.schedule import RETRY_INTERVAL, SUCCESS_INTERVAL, should_attempt  # noqa: E402
+from pinedog.transfer import ClockError, place_unsynced, run_transfer  # noqa: E402
+from pinedog.protocol import decode_status  # noqa: E402
 
 STATUS = struct.Struct("<BBIIIBB")
 SYNC_UNIX = 1_700_000_000

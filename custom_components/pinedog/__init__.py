@@ -1,4 +1,4 @@
-"""Woofmetric: dog activity from a PineTime collar, on custom firmware or stock InfiniTime."""
+"""Pinedog: dog activity from a PineTime collar, on custom firmware or stock InfiniTime."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import FIRMWARE_PINEDOG, FIRMWARE_STOCK
-from .coordinator import WoofmetricCoordinator
+from .coordinator import PinedogCoordinator
 from .protocol import SERVICE_UUID
 from .stock_coordinator import StockCoordinator
 
@@ -19,27 +19,27 @@ PLATFORMS = ["sensor", "binary_sensor"]
 
 
 @dataclass
-class WoofmetricRuntime:
-    coordinator: Union[WoofmetricCoordinator, StockCoordinator]
+class PinedogRuntime:
+    coordinator: Union[PinedogCoordinator, StockCoordinator]
 
 
-type WoofmetricConfigEntry = ConfigEntry[WoofmetricRuntime]
+type PinedogConfigEntry = ConfigEntry[PinedogRuntime]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: WoofmetricConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> bool:
     address: str = entry.data["address"]
     if entry.data.get("firmware", FIRMWARE_PINEDOG) == FIRMWARE_STOCK:
-        coordinator: Union[WoofmetricCoordinator, StockCoordinator] = StockCoordinator(
+        coordinator: Union[PinedogCoordinator, StockCoordinator] = StockCoordinator(
             hass, address, entry.entry_id
         )
         # Advertisements come many times a second; the coordinator's schedule gates them.
         matcher = {"address": address, "connectable": True}
     else:
-        coordinator = WoofmetricCoordinator(hass, address, entry.entry_id)
+        coordinator = PinedogCoordinator(hass, address, entry.entry_id)
         matcher = {"address": address, "service_uuid": SERVICE_UUID}
 
     await coordinator.async_load()
-    entry.runtime_data = WoofmetricRuntime(coordinator)
+    entry.runtime_data = PinedogRuntime(coordinator)
     entry.async_on_unload(
         bluetooth.async_register_callback(
             hass,
@@ -52,5 +52,5 @@ async def async_setup_entry(hass: HomeAssistant, entry: WoofmetricConfigEntry) -
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: WoofmetricConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> bool:
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

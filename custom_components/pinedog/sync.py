@@ -55,7 +55,7 @@ async def async_pull_records(
     hass: HomeAssistant, address: str, persist: PersistFn
 ) -> TransferResult:
     """Connect, run one transfer, and disconnect."""
-    client = await establish_connection(BleakClient, _device(hass, address), "Woofmetric", max_attempts=3)
+    client = await establish_connection(BleakClient, _device(hass, address), "Pinedog", max_attempts=3)
     try:
         return await run_transfer(BleakLink(client), int(time.time()), persist)
     finally:
@@ -64,7 +64,7 @@ async def async_pull_records(
 
 async def async_pair(hass: HomeAssistant, address: str) -> None:
     """Bond with the watch. The watch only accepts pairing while its button window is open."""
-    client = await establish_connection(BleakClient, _device(hass, address), "Woofmetric", max_attempts=3)
+    client = await establish_connection(BleakClient, _device(hass, address), "Pinedog", max_attempts=3)
     try:
         await client.pair()
     finally:

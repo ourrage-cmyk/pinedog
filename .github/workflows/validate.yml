@@ -35,6 +35,6 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install pytest
-      - run: python -m pytest -q tests/ha tests/woofmetric_stock
+      - run: python -m pytest -q tests/ha tests/pinedog_stock
       - run: sudo apt-get update && sudo apt-get install -y build-essential
       - run: make -C firmware test

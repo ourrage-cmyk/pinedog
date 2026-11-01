@@ -1,4 +1,4 @@
-"""Pure logic for Woofmetric records: decoding, daily totals and baseline.
+"""Pure logic for Pinedog records: decoding, daily totals and baseline.
 
 No Home Assistant imports here, so it can be tested with plain pytest.
 """

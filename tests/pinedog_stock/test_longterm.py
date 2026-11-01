@@ -4,12 +4,12 @@ import types
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "woofmetric"
-_pkg = types.ModuleType("woofmetric")
+PKG_DIR = Path(__file__).resolve().parents[2] / "custom_components" / "pinedog"
+_pkg = types.ModuleType("pinedog")
 _pkg.__path__ = [str(PKG_DIR)]
-sys.modules["woofmetric"] = _pkg
+sys.modules["pinedog"] = _pkg
 
-from woofmetric.longterm import MIN_LEARNED_DAYS, LongTerm  # noqa: E402
+from pinedog.longterm import MIN_LEARNED_DAYS, LongTerm  # noqa: E402
 
 START = date(2026, 10, 1)  # a Thursday
 

@@ -29,7 +29,7 @@ LOW_BATTERY_PCT = 20
 
 
 @dataclass
-class WoofmetricData:
+class PinedogData:
     today: DailyTotals | None = None
     baseline: Baseline = field(default_factory=lambda: Baseline("learning", None, None, 0.0, 0))
     last_sync: datetime | None = None
@@ -57,11 +57,11 @@ class _State:
     days: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
-class WoofmetricCoordinator(DataUpdateCoordinator[WoofmetricData]):
+class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
     def __init__(self, hass: HomeAssistant, address: str, entry_id: str) -> None:
-        super().__init__(hass, _LOGGER, name="Woofmetric", update_interval=None)
+        super().__init__(hass, _LOGGER, name="Pinedog", update_interval=None)
         self.address = address
-        self._store: Store[dict] = WoofStore(hass, STORE_VERSION, f"woofmetric.{entry_id}")
+        self._store: Store[dict] = WoofStore(hass, STORE_VERSION, f"pinedog.{entry_id}")
         self._state = _State()
         self._longterm = LongTerm()
         self._last_sync: datetime | None = None
@@ -100,7 +100,7 @@ class WoofmetricCoordinator(DataUpdateCoordinator[WoofmetricData]):
             for key, v in sorted(self._state.days.items())
         ]
 
-    def _build(self) -> WoofmetricData:
+    def _build(self) -> PinedogData:
         history = self._history()
         today_key = dt_util.now().date()
         today = next((d for d in history if d.day == today_key), None)
@@ -110,7 +110,7 @@ class WoofmetricCoordinator(DataUpdateCoordinator[WoofmetricData]):
             recent = [d for d in history if (today_key - d.day).days <= SHORT_TERM_DAYS]
             base = compute_baseline(today, recent)
         now_local = dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
-        return WoofmetricData(
+        return PinedogData(
             today=today,
             baseline=base,
             last_sync=self._last_sync,
@@ -125,7 +125,7 @@ class WoofmetricCoordinator(DataUpdateCoordinator[WoofmetricData]):
             longterm_days=self._longterm.days_learned,
         )
 
-    async def _async_update_data(self) -> WoofmetricData:
+    async def _async_update_data(self) -> PinedogData:
         forced, self._force_next = self._force_next, False
         if not forced and not self._attempt_allowed():
             return self._build()
@@ -136,7 +136,7 @@ class WoofmetricCoordinator(DataUpdateCoordinator[WoofmetricData]):
             self._last_error = None
         except Exception as err:  # noqa: BLE001 - keep sensors alive on any BLE error
             self._last_error = str(err) or type(err).__name__
-            _LOGGER.warning("Woofmetric sync failed, will retry: %s", self._last_error)
+            _LOGGER.warning("Pinedog sync failed, will retry: %s", self._last_error)
         finally:
             self._busy = False
         return self._build()
@@ -166,7 +166,7 @@ class WoofmetricCoordinator(DataUpdateCoordinator[WoofmetricData]):
             )
         if result.corrupt or result.unplaced:
             _LOGGER.warning(
-                "Woofmetric sync dropped %d corrupt and %d unplaceable records",
+                "Pinedog sync dropped %d corrupt and %d unplaceable records",
                 result.corrupt,
                 result.unplaced,
             )
