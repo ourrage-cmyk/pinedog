@@ -1,5 +1,5 @@
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 8b27c19..1876a57 100644
+index 8b27c19..96befe9 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
 @@ -459,6 +459,9 @@ list(APPEND SOURCE_FILES
@@ -22,6 +22,15 @@ index 8b27c19..1876a57 100644
          components/firmwarevalidator/FirmwareValidator.cpp
          components/settings/Settings.cpp
          components/timer/Timer.cpp
+@@ -770,7 +776,7 @@ link_directories(
+ 
+ 
+ set(COMMON_FLAGS -MP -MD -mthumb -mabi=aapcs -ftree-vrp -ffunction-sections -fdata-sections -fno-strict-aliasing -fno-builtin -fshort-enums -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16 -fstack-usage -fno-exceptions -fno-non-call-exceptions)
+-set(WARNING_FLAGS -Wall -Wextra -Warray-bounds=2 -Wformat=2 -Wformat-overflow=2 -Wformat-truncation=2 -Wformat-nonliteral -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-expansion-to-defined -Wreturn-type -Werror=return-type -Werror)
++set(WARNING_FLAGS -Wall -Wextra -Warray-bounds=2 -Wformat=2 -Wformat-overflow=2 -Wformat-truncation=2 -Wformat-nonliteral -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-expansion-to-defined -Wreturn-type -Werror=return-type -Werror -Wno-error=array-bounds)
+ set(DEBUG_FLAGS -Og -g3)
+ set(RELEASE_FLAGS -Os)
+ set(CXX_FLAGS -fno-rtti)
 diff --git a/src/components/ble/NimbleController.cpp b/src/components/ble/NimbleController.cpp
 index 2e7f800..07121a0 100644
 --- a/src/components/ble/NimbleController.cpp
