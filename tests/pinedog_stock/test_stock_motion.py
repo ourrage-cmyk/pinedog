@@ -130,3 +130,12 @@ def test_log_survives_store_round_trip():
     restored = DayLog.from_dict(log.to_dict())
     assert restored.daily_totals() == log.daily_totals()
     assert restored.last_ts == log.last_ts
+
+
+def test_duplicate_poll_in_same_second_adds_no_time():
+    # A retried or doubled poll must not be credited twice.
+    log = DayLog()
+    log.add_poll(1000, 10.0, at(DAY1, 9))
+    log.add_poll(1000, 10.0, at(DAY1, 9))
+    log.add_poll(1000 + 600, 10.0, at(DAY1, 9, 10))
+    assert log.days[DAY1.isoformat()]["sedentary_s"] == 600.0
