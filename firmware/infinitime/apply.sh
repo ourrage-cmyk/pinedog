@@ -36,15 +36,17 @@ python3 - "$target" <<'PY'
 import sys
 path = sys.argv[1] + "/src/displayapp/screens/SystemInfo.cpp"
 s = open(path).read()
-create = "void SystemInfo::CreateScreen1() {\n"
-assert s.count(create) == 1, "SystemInfo::CreateScreen1 not found once"
-s = s.replace(create, create + """  {
+import re
+pat = re.compile(r"void SystemInfo::CreateScreen1\(\)\s*\{\n")
+found = pat.findall(s)
+assert len(found) == 1, "SystemInfo::CreateScreen1 not found once: %d" % len(found)
+s = pat.sub(lambda m: m.group(0) + """  {
     // Pinedog: the dog name, so two watches can be told apart.
     lv_obj_t* dogLabel = lv_label_create(lv_scr_act(), nullptr);
     lv_label_set_text(dogLabel, Pinetime::Pinedog::DogName());
     lv_obj_align(dogLabel, lv_scr_act(), LV_ALIGN_IN_TOP_LEFT, 0, 0);
   }
-""")
+""", s, count=1)
 s = '#include "components/pinedog/PinedogName.h"\n' + s
 open(path, "w").write(s)
 PY
