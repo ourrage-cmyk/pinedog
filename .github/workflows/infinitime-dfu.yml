@@ -41,7 +41,7 @@ jobs:
         id: pin
         run: |
           echo "sha=$(sed -n 's/^commit //p' pinedog/firmware/infinitime/UPSTREAM)" >> "$GITHUB_OUTPUT"
-          echo "tag=main-$(sed -n 's/^commit //p' pinedog/firmware/infinitime/UPSTREAM | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          echo "tag=$(sed -n 's/^InfiniTimeOrg\/InfiniTime tag //p' pinedog/firmware/infinitime/UPSTREAM)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout InfiniTime at the pinned commit
         uses: actions/checkout@v4

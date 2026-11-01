@@ -1,4 +1,4 @@
-InfiniTimeOrg/InfiniTime branch main
-commit 0ffd888745aa14a67ad7cf9fb77ce45804e1d092
-# Pinned to main, not 1.16.1: main moved the CI toolchain to GCC 15.3 and fixed
-# littlefs logging for it (lfs_config.h). 1.16.1 fails to compile littlefs with the image.
+InfiniTimeOrg/InfiniTime tag 1.14.1
+commit 822e0efbe26f6b9c0a37d34f8f8c78f0defc36d4
+# 1.14.1 is the version the watch runs. The port is rebased onto it so that the
+# new application image matches the resources already on the watch.

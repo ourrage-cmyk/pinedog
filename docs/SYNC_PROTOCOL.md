@@ -114,6 +114,32 @@ every 5 minutes or on each Request. A power cut loses at most that batch.
   so the InfiniTime build relies on LittleFS for power-loss safety, and does
   not need its own flash layout.
 
+## Wire details for the client
+
+Use this section to write a client. Everything is little-endian.
+
+| Step | Write or read | Bytes | Notes |
+|---|---|---|---|
+| Discover | scan | service `5d0f0000-…` in the scan response | name `InfiniTime` |
+| Connect | GATT | ATT MTU as negotiated, default 23 | notifications carry 1 or 2 records (8 or 16 bytes) plus the 5-byte end marker |
+| Read Status | read `…0002` | 16 | layout above |
+| Time | write `…0001` | 4: u32 unix seconds | optional; only if flag bit 0 is clear or drift is large |
+| Request | write `…0003` | any, ignored | starts a snapshot; restarts any earlier one |
+| Records | notify `…0004` | n × 8, or 5 | end marker is `0xEE` then u32 count |
+| Ack | write `…0005` | 4: u32 count | count of records stored from the snapshot start; send once, after the end marker |
+
+Client rules:
+- Store records before writing Ack. Check each record's CRC-8; keep the minute cursor to drop duplicates on resend.
+- The end-marker count must equal the number of records received. If it does not, do not Ack.
+- If the link drops before the end marker, reconnect and Request again. Do not Ack a partial snapshot.
+- Ack only on the connection that sent Request. Other connections are ignored.
+- Writes to Time, Request and Ack use write-with-response. Notifications are not acknowledged by the client.
+- Timeouts: the watch gives up a stream after 30 s without a notification it could send.
+
+## Pairing and bonding (not used yet)
+
+Stock InfiniTime 1.14.1 does not configure a bond store. Bonds are not kept across a reboot, so a pairing made today would stop working on the next watch reboot. A persistent store is needed before pairing can be required. It is not in this change.
+
 ## Testing status
 
 Host tests cover the store (append, reopen, ack, day boundaries, torn tail,

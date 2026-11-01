@@ -1,8 +1,8 @@
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index e4a354d..e108075 100644
+index 8b27c19..1876a57 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -466,6 +466,9 @@ list(APPEND SOURCE_FILES
+@@ -459,6 +459,9 @@ list(APPEND SOURCE_FILES
          components/ble/ServiceDiscovery.cpp
          components/ble/HeartRateService.cpp
          components/ble/MotionService.cpp
@@ -12,7 +12,7 @@ index e4a354d..e108075 100644
          components/firmwarevalidator/FirmwareValidator.cpp
          components/motor/MotorController.cpp
          components/settings/Settings.cpp
-@@ -537,6 +540,9 @@ list(APPEND RECOVERY_SOURCE_FILES
+@@ -528,6 +531,9 @@ list(APPEND RECOVERY_SOURCE_FILES
          components/ble/NavigationService.cpp
          components/ble/HeartRateService.cpp
          components/ble/MotionService.cpp
@@ -23,7 +23,7 @@ index e4a354d..e108075 100644
          components/settings/Settings.cpp
          components/timer/Timer.cpp
 diff --git a/src/components/ble/NimbleController.cpp b/src/components/ble/NimbleController.cpp
-index 5059007..9e5f042 100644
+index 2e7f800..07121a0 100644
 --- a/src/components/ble/NimbleController.cpp
 +++ b/src/components/ble/NimbleController.cpp
 @@ -1,4 +1,5 @@
@@ -32,7 +32,7 @@ index 5059007..9e5f042 100644
  #include <cstring>
  
  #include <nrf_log.h>
-@@ -169,6 +170,11 @@ void NimbleController::StartAdvertising() {
+@@ -166,6 +167,11 @@ void NimbleController::StartAdvertising() {
    rsp_fields.name = reinterpret_cast<const uint8_t*>(deviceName);
    rsp_fields.name_len = strlen(deviceName);
    rsp_fields.name_is_complete = 1;
@@ -72,10 +72,10 @@ index aba3050..b8c841e 100644
        int FileDelete(const char* fileName);
  
 diff --git a/src/main.cpp b/src/main.cpp
-index d0ab3e4..6473299 100644
+index ab50fa7..f4af0eb 100644
 --- a/src/main.cpp
 +++ b/src/main.cpp
-@@ -45,6 +45,7 @@
+@@ -44,6 +44,7 @@
  #include "drivers/Cst816s.h"
  #include "drivers/PinMap.h"
  #include "systemtask/SystemTask.h"
@@ -83,15 +83,15 @@ index d0ab3e4..6473299 100644
  #include "touchhandler/TouchHandler.h"
  #include "buttonhandler/ButtonHandler.h"
  
-@@ -102,6 +103,7 @@ Pinetime::Controllers::HeartRateController heartRateController;
- Pinetime::Applications::HeartRateTask heartRateApp(heartRateSensor, heartRateController, settingsController);
+@@ -101,6 +102,7 @@ Pinetime::Controllers::Settings settingsController {fs};
+ Pinetime::Controllers::MotorController motorController {};
  
  Pinetime::Controllers::DateTime dateTimeController {settingsController};
 +Pinetime::Pinedog::PinedogService pinedogService {fs, dateTimeController, batteryController};
  Pinetime::Drivers::Watchdog watchdog;
  Pinetime::Controllers::NotificationManager notificationManager;
  Pinetime::Controllers::MotionController motionController;
-@@ -149,7 +151,8 @@ Pinetime::System::SystemTask systemTask(spi,
+@@ -145,7 +147,8 @@ Pinetime::System::SystemTask systemTask(spi,
                                          heartRateApp,
                                          fs,
                                          touchHandler,
@@ -102,7 +102,7 @@ index d0ab3e4..6473299 100644
  int stackOverflowCount = 0;
  extern "C" {
 diff --git a/src/systemtask/SystemTask.cpp b/src/systemtask/SystemTask.cpp
-index 56bf927..3b9fd87 100644
+index b245e39..90cd3ef 100644
 --- a/src/systemtask/SystemTask.cpp
 +++ b/src/systemtask/SystemTask.cpp
 @@ -1,4 +1,5 @@
@@ -111,7 +111,7 @@ index 56bf927..3b9fd87 100644
  #include <hal/nrf_rtc.h>
  #include <libraries/gpiote/app_gpiote.h>
  #include <libraries/log/nrf_log.h>
-@@ -52,7 +53,8 @@ SystemTask::SystemTask(Drivers::SpiMaster& spi,
+@@ -51,7 +52,8 @@ SystemTask::SystemTask(Drivers::SpiMaster& spi,
                         Pinetime::Applications::HeartRateTask& heartRateApp,
                         Pinetime::Controllers::FS& fs,
                         Pinetime::Controllers::TouchHandler& touchHandler,
@@ -121,7 +121,7 @@ index 56bf927..3b9fd87 100644
    : spi {spi},
      spiNorFlash {spiNorFlash},
      twiMaster {twiMaster},
-@@ -74,6 +76,7 @@ SystemTask::SystemTask(Drivers::SpiMaster& spi,
+@@ -72,6 +74,7 @@ SystemTask::SystemTask(Drivers::SpiMaster& spi,
      fs {fs},
      touchHandler {touchHandler},
      buttonHandler {buttonHandler},
@@ -129,7 +129,7 @@ index 56bf927..3b9fd87 100644
      nimbleController(*this,
                       bleController,
                       dateTimeController,
-@@ -115,6 +118,8 @@ void SystemTask::Work() {
+@@ -111,6 +114,8 @@ void SystemTask::Work() {
    fs.Init();
  
    nimbleController.Init();
@@ -138,7 +138,7 @@ index 56bf927..3b9fd87 100644
  
    twiMaster.Init();
    /*
-@@ -455,6 +460,10 @@ void SystemTask::UpdateMotion() {
+@@ -431,6 +436,10 @@ void SystemTask::UpdateMotion() {
  
    motionController.Update(motionValues.x, motionValues.y, motionValues.z, motionValues.steps);
  
@@ -150,10 +150,10 @@ index 56bf927..3b9fd87 100644
      if ((settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::RaiseWrist) &&
           motionController.ShouldRaiseWake()) ||
 diff --git a/src/systemtask/SystemTask.h b/src/systemtask/SystemTask.h
-index 606ddd3..520a529 100644
+index 79f1cf4..36e5c65 100644
 --- a/src/systemtask/SystemTask.h
 +++ b/src/systemtask/SystemTask.h
-@@ -35,6 +35,9 @@
+@@ -34,6 +34,9 @@
  extern std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> NoInit_BackUpTime;
  
  namespace Pinetime {
@@ -163,7 +163,7 @@ index 606ddd3..520a529 100644
    namespace Drivers {
      class Cst816S;
      class SpiMaster;
-@@ -74,7 +77,8 @@ namespace Pinetime {
+@@ -72,7 +75,8 @@ namespace Pinetime {
                   Pinetime::Applications::HeartRateTask& heartRateApp,
                   Pinetime::Controllers::FS& fs,
                   Pinetime::Controllers::TouchHandler& touchHandler,
@@ -173,7 +173,7 @@ index 606ddd3..520a529 100644
  
        void Start();
        void PushMessage(Messages msg);
-@@ -126,6 +130,7 @@ namespace Pinetime {
+@@ -120,6 +124,7 @@ namespace Pinetime {
        Pinetime::Controllers::FS& fs;
        Pinetime::Controllers::TouchHandler& touchHandler;
        Pinetime::Controllers::ButtonHandler& buttonHandler;

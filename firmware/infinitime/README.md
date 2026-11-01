@@ -1,12 +1,12 @@
 # InfiniTime port: store-and-sync
 
-A port of the Pinedog logger and sync service into InfiniTime (main at 0ffd888). The
+A port of the Pinedog logger and sync service into InfiniTime (1.14.1, the version the watch runs). The
 result is a standard MCUboot DFU zip, which installs over Bluetooth on a stock
 PineTime. No SWD and no bootloader changes.
 
 | Path | What it is |
 |---|---|
-| `UPSTREAM` | the InfiniTime tag and commit this port is built against |
+| `UPSTREAM` | the InfiniTime tag and commit this port is built against (1.14.1) |
 | `pinedog/` | new sources: core summary and record code, record store, BLE service |
 | `glue.patch` | edits to existing InfiniTime files (CMake, main, SystemTask, FS, advertising) |
 | `apply.sh` | copies `pinedog/` into an InfiniTime checkout and applies the patch |
