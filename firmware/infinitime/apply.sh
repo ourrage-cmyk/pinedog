@@ -50,6 +50,14 @@ grep -q '^if(DEFINED ENABLE_USERAPPS)' "$apps_cm" \
   cat "$apps_cm"
 } > "$apps_cm.tmp" && mv "$apps_cm.tmp" "$apps_cm"
 
+# Give this build a distinct Device Information firmware revision, so a flashed Pinedog
+# image can be told from stock 1.14.1 over BLE. PINEDOG_REV (the commit) sets the suffix.
+rev="${PINEDOG_REV:-dev}"; rev="${rev:0:7}"
+dis="$target/src/components/ble/DeviceInformationService.h"
+grep -q 'static constexpr const char\* fwRevision = Version::VersionString();' "$dis" \
+  || { echo "unexpected fwRevision in $dis" >&2; exit 1; }
+sed -i "s|static constexpr const char\* fwRevision = Version::VersionString();|static constexpr const char* fwRevision = \"1.14.1-pd-$rev\";|" "$dis"
+
 # Show the dog name on the System Info screen, so the two watches can be told apart.
 # One label, added after the screen is created. Assert each anchor matches exactly once.
 python3 - "$target" <<'PY'

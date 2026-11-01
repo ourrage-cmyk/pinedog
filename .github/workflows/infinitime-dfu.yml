@@ -62,6 +62,8 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           bash pinedog/firmware/infinitime/apply.sh infinitime
+        env:
+          PINEDOG_REV: ${{ github.sha }}
 
       - name: Install resource build dependencies
         run: |
@@ -143,7 +145,7 @@ jobs:
         run: |
           mkdir -p out
           src=$(ls infinitime/build/output/pinetime-mcuboot-app-dfu-*.zip | head -n 1)
-          cp "$src" "out/pinedog-infinitime-${{ steps.pin.outputs.tag }}-dfu.zip"
+          cp "$src" "out/pinedog-infinitime-${{ steps.pin.outputs.tag }}-${{ matrix.toolchain }}-dfu.zip"
           cp control/*.zip out/ 2>/dev/null || echo "control image was not built"
           cp official/*.zip out/ 2>/dev/null || echo "official zip was not fetched"
           cd out && sha256sum *.zip > SHA256SUMS && cat SHA256SUMS
@@ -174,3 +176,4 @@ jobs:
           name: pinedog-infinitime-dfu-${{ matrix.toolchain }}
           path: out/
           if-no-files-found: error
+
