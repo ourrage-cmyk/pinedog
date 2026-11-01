@@ -331,14 +331,14 @@ void PinedogService::Tick() {
   }
   if (validatePending.exchange(false)) {
     // The same routine as Settings > Firmware > Validate, triggered over BLE.
-    FirmwareValidator validator;
+    Controllers::FirmwareValidator validator;
     validator.Validate();
   }
   // Self-confirm: after one full ack cycle this boot and an hour of uptime, confirm the
   // image. A bad image never gets here or never acks, so it still rolls back on reboot.
   if (ackedThisBoot && ++gateTicks >= 600) {
     gateTicks = 0;
-    FirmwareValidator validator;
+    Controllers::FirmwareValidator validator;
     if (!validator.IsValidated() && dateTime.Uptime().count() >= 3600) {
       validator.Validate();
     }
