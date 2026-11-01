@@ -14,6 +14,7 @@ sys.modules["pinedog"] = _pkg
 from pinedog.activity import compute_baseline  # noqa: E402
 from pinedog.stock_motion import (  # noqa: E402
     BATTERY_LEVEL_UUID,
+    STEP_COUNT_UUID,
     DEFAULT_ACTIVE_THRESHOLD,
     MAX_INTERVAL_S,
     MOTION_VALUES_UUID,
@@ -37,7 +38,10 @@ def feed(log: DayLog, start: datetime, motions, step_s: int = 300) -> None:
 
 
 def test_uuids_match_infinitime_source():
-    assert MOTION_VALUES_UUID == "00030200-78fc-48fe-8e23-433b3a1942d0"
+    # Derived from InfiniTime MotionService: CharUuid(0x01,0x00) is step count, (0x02,0x00) is motion.
+    # Confirmed on a real watch (InfiniTime 1.14.1): 00030001 notifiable, 00030002 raw motion.
+    assert STEP_COUNT_UUID == "00030001-78fc-48fe-8e23-433b3a1942d0"
+    assert MOTION_VALUES_UUID == "00030002-78fc-48fe-8e23-433b3a1942d0"
     assert BATTERY_LEVEL_UUID == "00002a19-0000-1000-8000-00805f9b34fb"
 
 

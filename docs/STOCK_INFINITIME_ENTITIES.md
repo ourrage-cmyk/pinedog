@@ -2,11 +2,11 @@
 
 Goal: per dog, active time, sedentary time, a daily activity score, and whether today is more or less than that dog's usual. The long-term usual keeps improving for as long as the dog is tracked.
 
-Source data (InfiniTime `main`, read October 2026):
+Source data (InfiniTime 1.14.1, confirmed on a real watch):
 
 | Characteristic | UUID | Format | Use |
 |---|---|---|---|
-| Motion values | `00030200-78fc-48fe-8e23-433b3a1942d0` | int16 x, y, z LE, read + notify | Activity index per poll |
+| Motion values | `00030002-78fc-48fe-8e23-433b3a1942d0` | 6 bytes, int16 x, y, z LE, read + notify, about 10 Hz | Activity index per poll, from about 600 samples in 60 s |
 | Battery level | `00002a19-0000-1000-8000-00805f9b34fb` | uint8 percent, read | Battery |
 
 ## Entities
@@ -35,6 +35,6 @@ Custom firmware exposes the same daily entities from its record sync, plus charg
 
 ## Unverified on hardware
 
-- The motion characteristic's notification rate, and whether it works without a phone.
+- Whether motion notifications keep working while a phone is also connected.
 - The absolute scale of the motion index.
 - The 30% threshold, the 115% and 85% bands, and the 50 starting threshold.

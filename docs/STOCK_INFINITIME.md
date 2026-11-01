@@ -13,7 +13,9 @@ The watch keeps no minute history that Home Assistant can read over BLE. Home As
 - **Sampling.** While the collar is in range, Home Assistant polls it at most every 10 minutes. Each poll samples motion for 60 s. That sample stands for the time since the previous poll, capped at 10 minutes. Longer gaps (collar out of range) count as unknown, not sedentary.
 - **Advertisements.** The collar advertises constantly. Home Assistant uses those as the trigger, so a poll starts when the collar is near, and the schedule stops it polling more than once per 10 minutes.
 - **Off-body time** is not detected. A collar taken off counts as sedentary until the next gap.
-- **Battery.** Each poll holds the radio for about a minute. This is not measured yet. Check the battery entity over a week before changing the interval.
+- **Sample rate.** The motion characteristic (`00030002`) sends about 10 samples per second with notifications on, so one 60 s window gives about 600 samples.
+- **Connection timing.** On a real watch (InfiniTime 1.14.1) scan and connect took 5 to 6 s, and five connect cycles in a row all succeeded.
+- **Radio time.** Each poll is roughly 5 to 6 s to connect plus 60 s of sampling, so about 70 s of radio per 10 minutes. Battery drain at that duty cycle is not measured yet. Check the battery entity over a week before changing the interval.
 
 ## Requirements and Bluetooth setup
 
@@ -25,7 +27,7 @@ The watch keeps no minute history that Home Assistant can read over BLE. Home As
 
 ## Pairing
 
-- **Stock InfiniTime: no pairing.** The Motion and Battery reads and the motion notifications need no bond. Checked in InfiniTime's source for the Motion service. The Battery service was not checked for security flags, and this is **unverified on hardware**.
+- **Stock InfiniTime: no pairing.** Confirmed on a real watch (InfiniTime 1.14.1): the battery level and motion notifications work without a bond.
 - Custom firmware (the Pinedog record protocol) asks you to press the watch button and pair in the config flow. Its pairing window lasts 60 seconds.
 
 ## How the learning works
@@ -52,10 +54,21 @@ Then keep the collar on and near the Pi. A "Collar found" card appears under Set
 - **Poll timing** is set in `stock_coordinator.py` (`MAX_INTERVAL_S`, `SAMPLE_SECONDS`). It is not a UI option yet.
 - **Charging and heart rate** are not exposed by stock InfiniTime over BLE and are not included.
 
+## Characteristics used
+
+| Purpose | UUID | Format |
+|---|---|---|
+| Raw motion (used) | `00030002-78fc-48fe-8e23-433b3a1942d0` | 6 bytes, int16 x, y, z, little-endian, about 10 Hz on notify |
+| Step count (not read) | `00030001-78fc-48fe-8e23-433b3a1942d0` | uint32 little-endian, read and notify |
+| Battery level | `00002a19-0000-1000-8000-00805f9b34fb` | uint8 percent, read and notify |
+
+The step count is on the watch but Pinedog does not read it, because steps are not a headline measure on a dog.
+
 ## Unverified on hardware
 
-- Motion notifications: rate, and whether they work while the phone is also near.
+- Only one of two watches was visible during the first test, so two-collar setups are not yet tested.
+- Whether motion notifications keep working while a phone is also connected.
 - Whether Home Assistant connects reliably from the Pi's built-in adapter at the dog's usual spot.
-- Battery use at a 10-minute poll with a 60 s sample.
+- Battery drain at a 10-minute poll with a 60 s sample (about 70 s of radio per poll).
 - The absolute scale of the motion index.
 - The placeholder threshold and bands.

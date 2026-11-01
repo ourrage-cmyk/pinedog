@@ -22,7 +22,8 @@ from typing import Any
 from .activity import DailyTotals
 from .longterm import LongTerm
 
-MOTION_VALUES_UUID = "00030200-78fc-48fe-8e23-433b3a1942d0"  # read, notify; int16 x, y, z
+MOTION_VALUES_UUID = "00030002-78fc-48fe-8e23-433b3a1942d0"  # read, notify; 6 bytes: int16 x, y, z little-endian; about 10 Hz when notifying
+STEP_COUNT_UUID = "00030001-78fc-48fe-8e23-433b3a1942d0"  # read, notify; uint32 LE; not read by Pinedog
 BATTERY_SERVICE_UUID = "0000180f-0000-1000-8000-00805f9b34fb"
 BATTERY_LEVEL_UUID = "00002a19-0000-1000-8000-00805f9b34fb"  # read, notify; uint8 percent
 
