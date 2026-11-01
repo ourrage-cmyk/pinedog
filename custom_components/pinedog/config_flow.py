@@ -87,9 +87,8 @@ class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._discovered = info
                 self._firmware = _firmware_for(info)
                 self.context["title_placeholders"] = {"name": info.name or "Collar"}
-                if self._firmware == FIRMWARE_STOCK:
-                    return self._create(FIRMWARE_STOCK)
-                return await self.async_step_pair()
+                # Neither firmware needs pairing: the InfiniTime port has no bonding.
+                return self._create(self._firmware)
 
         # Likely watches first, then the strongest signal.
         ordered = sorted(
@@ -117,9 +116,7 @@ class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         assert self._discovered is not None
         if user_input is not None:
-            if self._firmware == FIRMWARE_STOCK:
-                return self._create(FIRMWARE_STOCK)
-            return await self.async_step_pair()
+            return self._create(self._firmware)
         self._set_confirm_only()
         return self.async_show_form(
             step_id="bluetooth_confirm",
