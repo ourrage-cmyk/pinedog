@@ -241,7 +241,7 @@ void PinedogService::PumpStream() {
     }
     // Records go out exactly as they are on flash. Home Assistant checks each CRC.
     auto* om = ble_hs_mbuf_from_flat(recs, static_cast<uint16_t>(got * sizeof(pd_record)));
-    if (om == nullptr || ble_gatts_notify_custom(streamConn, recordsHandle, om) != 0) {
+    if (om == nullptr || ble_gattc_notify_custom(streamConn, recordsHandle, om) != 0) {
       break; // link buffers are busy: try again on the next tick
     }
     streamNext += static_cast<uint32_t>(got);
@@ -253,7 +253,7 @@ void PinedogService::PumpStream() {
     uint8_t end[5] = {kEndMarker, 0, 0, 0, 0};
     std::memcpy(end + 1, &streamCount, sizeof(streamCount));
     auto* om = ble_hs_mbuf_from_flat(end, sizeof(end));
-    if (om != nullptr && ble_gatts_notify_custom(streamConn, recordsHandle, om) == 0) {
+    if (om != nullptr && ble_gattc_notify_custom(streamConn, recordsHandle, om) == 0) {
       stream = Stream::Done; // waiting for the Ack
     }
   } else if (sent == 0 && ++stalledTicks > kStallTicks) {
