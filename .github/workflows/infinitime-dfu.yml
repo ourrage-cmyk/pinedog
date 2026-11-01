@@ -177,3 +177,37 @@ jobs:
           path: out/
           if-no-files-found: error
 
+  publish:
+    # Publishes each commit's DFU sets as a public pre-release, so the laptop can fetch
+    # them with curl and no GitHub login. Runs even if one toolchain variant failed.
+    needs: build-dfu
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the DFU sets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pinedog-infinitime-dfu-*
+          path: sets
+
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REV: ${{ github.sha }}
+        run: |
+          set -e
+          tag="nightly-${REV:0:7}"
+          mkdir -p release
+          for d in sets/*/; do
+            v=${d%/}; v=${v##*-}
+            for f in "$d"*.zip; do
+              cp "$f" "release/$v-$(basename "$f")"
+            done
+          done
+          cd release && sha256sum *.zip > SHA256SUMS && cat SHA256SUMS && cd ..
+          gh release create "$tag" --prerelease --target "$REV" --title "Pinedog nightly ${REV:0:7}" \
+            --notes "InfiniTime 1.14.1 with the Pinedog port, built from $REV. Variants: apt (Ubuntu GCC 10.3) and arm10 (official Arm GNU Toolchain 10.3-2021.10). Each zip is prefixed with its variant; SHA256SUMS lists them all." \
+            release/*.zip release/SHA256SUMS \
+          || gh release upload "$tag" release/*.zip release/SHA256SUMS --clobber
