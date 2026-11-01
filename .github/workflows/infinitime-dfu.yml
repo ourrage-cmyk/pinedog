@@ -29,6 +29,12 @@ jobs:
   build-dfu:
     needs: host-tests
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # apt: Ubuntu's gcc-arm-none-eabi plus newlib (the current build).
+        # arm10: the official Arm GNU Toolchain 10.3-2021.10 tarball, as upstream builds.
+        toolchain: [apt, arm10]
     container:
       image: infinitime/infinitime-build
     steps:
@@ -60,16 +66,29 @@ jobs:
       - name: Install resource build dependencies
         run: |
           apt-get update
-          apt-get -y install --no-install-recommends python3-pil gcc-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
+          apt-get -y install --no-install-recommends python3-pil
+          if [ "${{ matrix.toolchain }}" = apt ]; then
+            apt-get -y install --no-install-recommends gcc-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
+          fi
 
       - name: Point the image toolchain at GCC 10.3
         run: |
-          # /opt/build.sh links with the image's GCC 15.3 no matter what PATH says.
-          # 1.14.1 targets GCC 10.3 (apt gcc-arm-none-eabi 10.3-2021.10), so the
-          # image's toolchain directory is moved aside and replaced with a link to /usr.
-          mv /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi.unused
-          ln -s /usr /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi
-          /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc --version | head -n 1
+          # /opt/build.sh links with the image's GCC 15.3 no matter what PATH says, so the
+          # image's toolchain path is replaced: with a link to apt's GCC (apt), or with the
+          # official Arm GNU Toolchain 10.3-2021.10 (arm10), which is what upstream builds with.
+          set -e
+          link=/opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi
+          if [ "${{ matrix.toolchain }}" = apt ]; then
+            mv "$link" "$link.unused"
+            ln -s /usr "$link"
+          else
+            curl -sSL -o /tmp/arm-10.tar.bz2 https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2
+            sha256sum /tmp/arm-10.tar.bz2
+            mkdir -p /opt/arm10
+            tar -xjf /tmp/arm-10.tar.bz2 -C /opt/arm10 --strip-components=1
+            ln -sfn /opt/arm10 "$link"
+          fi
+          "$link/bin/arm-none-eabi-gcc" --version | head -n 1
 
       - name: Build
         env:
@@ -152,6 +171,6 @@ jobs:
       - name: Upload DFU zip
         uses: actions/upload-artifact@v4
         with:
-          name: pinedog-infinitime-dfu
+          name: pinedog-infinitime-dfu-${{ matrix.toolchain }}
           path: out/
           if-no-files-found: error
