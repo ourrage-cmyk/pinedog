@@ -1,7 +1,10 @@
 """Finds a collar through Home Assistant's Bluetooth stack.
 
 Custom firmware is recognised by its service and bonds with the watch. Stock InfiniTime
-is recognised by its name and needs no pairing.
+is recognised by its name or its DFU service, and needs no pairing.
+
+Discovery only offers devices whose advertisements match the manifest. If a watch is not
+offered, the user can pick it from the Bluetooth devices the adapter can hear.
 """
 
 from __future__ import annotations
@@ -9,14 +12,39 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import voluptuous as vol
+
+from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.helpers import selector
 
 from .const import DOMAIN, FIRMWARE_PINEDOG, FIRMWARE_STOCK
 from .protocol import SERVICE_UUID
 from .sync import async_pair
 
 _LOGGER = logging.getLogger(__name__)
+
+# Nordic buttonless DFU service. InfiniTime advertises it, so it helps discovery find a
+# stock watch even when the watch's advertised name is missing.
+DFU_SERVICE_UUID = "00001530-1212-efde-1523-785feabcd123"
+
+
+def _uuids(info: BluetoothServiceInfoBleak) -> set[str]:
+    return {u.lower() for u in info.service_uuids or []}
+
+
+def _firmware_for(info: BluetoothServiceInfoBleak) -> str:
+    return FIRMWARE_PINEDOG if SERVICE_UUID in _uuids(info) else FIRMWARE_STOCK
+
+
+def _looks_like_watch(info: BluetoothServiceInfoBleak) -> bool:
+    uuids = _uuids(info)
+    return (
+        SERVICE_UUID in uuids
+        or DFU_SERVICE_UUID in uuids
+        or (info.name or "").startswith("InfiniTime")
+    )
 
 
 class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -32,10 +60,57 @@ class PinedogConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
         self._discovered = discovery_info
-        uuids = {u.lower() for u in discovery_info.service_uuids or []}
-        self._firmware = FIRMWARE_PINEDOG if SERVICE_UUID in uuids else FIRMWARE_STOCK
+        self._firmware = _firmware_for(discovery_info)
         self.context["title_placeholders"] = {"name": discovery_info.name or "Collar"}
         return await self.async_step_bluetooth_confirm()
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick a collar the adapter can hear, for watches that discovery does not offer."""
+        seen = {
+            i.address: i
+            for i in bluetooth.async_discovered_service_info(self.hass, connectable=True)
+        }
+        if not seen:
+            return self.async_abort(reason="no_devices_found")
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            address = (user_input.get("manual_address") or user_input["address"]).strip().upper()
+            info = seen.get(address)
+            if info is None:
+                errors["base"] = "not_seen"
+            else:
+                await self.async_set_unique_id(address)
+                self._abort_if_unique_id_configured()
+                self._discovered = info
+                self._firmware = _firmware_for(info)
+                self.context["title_placeholders"] = {"name": info.name or "Collar"}
+                if self._firmware == FIRMWARE_STOCK:
+                    return self._create(FIRMWARE_STOCK)
+                return await self.async_step_pair()
+
+        # Likely watches first, then the strongest signal.
+        ordered = sorted(
+            seen.values(),
+            key=lambda i: (not _looks_like_watch(i), -(i.rssi or -127)),
+        )
+        options = [
+            selector.SelectOptionDict(value=i.address, label=f"{i.name or 'Unnamed'} ({i.address})")
+            for i in ordered
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required("address", default=ordered[0].address): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=options, mode=selector.SelectSelectorMode.DROPDOWN
+                    )
+                ),
+                vol.Optional("manual_address"): selector.TextSelector(),
+            }
+        )
+        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
     async def async_step_bluetooth_confirm(
         self, user_input: dict[str, Any] | None = None
