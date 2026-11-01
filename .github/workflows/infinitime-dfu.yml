@@ -68,11 +68,13 @@ jobs:
         run: /opt/build.sh all
 
       - name: Report flash and RAM use
+        if: always()
         run: |
           arm-none-eabi-size infinitime/build/src/pinetime-mcuboot-app.out || true
           arm-none-eabi-nm --size-sort -S --radix=d infinitime/build/src/pinetime-mcuboot-app.out | awk '$3 ~ /[bBdD]/' | tail -n 25 || true
 
       - name: Checkout stock InfiniTime for a RAM baseline (diagnostic)
+        if: always()
         uses: actions/checkout@v4
         with:
           repository: InfiniTimeOrg/InfiniTime
@@ -82,6 +84,7 @@ jobs:
           fetch-depth: 1
 
       - name: Build stock app for a RAM baseline (diagnostic)
+        if: always()
         continue-on-error: true
         env:
           SOURCES_DIR: ${{ github.workspace }}/infinitime-stock
