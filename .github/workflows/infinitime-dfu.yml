@@ -60,7 +60,7 @@ jobs:
       - name: Install resource build dependencies
         run: |
           apt-get update
-          apt-get -y install --no-install-recommends python3-pil gcc-arm-none-eabi
+          apt-get -y install --no-install-recommends python3-pil gcc-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
 
       - name: Point the image toolchain at GCC 10.3
         run: |
