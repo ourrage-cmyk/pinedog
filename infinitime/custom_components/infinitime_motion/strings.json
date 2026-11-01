@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "bluetooth_confirm": {
+        "title": "InfiniTime watch found",
+        "description": "Do you want to add {name} to Home Assistant? The watch keeps its normal firmware. No pairing is needed."
+      }
+    },
+    "abort": {
+      "already_configured": "This watch is already set up."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "steps_today": { "name": "Steps today" },
+      "steps_last_hour": { "name": "Steps last hour" },
+      "active_intervals_today": { "name": "Active intervals today" },
+      "steps_vs_baseline": { "name": "Steps vs 7-day baseline" },
+      "battery": { "name": "Battery" },
+      "activity": { "name": "Motion index" },
+      "last_seen": { "name": "Last seen" }
+    },
+    "binary_sensor": {
+      "connected": { "name": "Connected" }
+    }
+  }
+}
