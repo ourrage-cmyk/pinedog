@@ -107,8 +107,11 @@ int pd_store_open(struct pd_store* s, const struct pd_fs* fs) {
     (void)s->fs.remove(s->fs.ctx, path);
   }
 
+  /* The boot counter is saved with the first append, not here: a boot must not write to
+   * flash, because a hang in a flash write is what the watchdog catches on the watch. */
   s->boot = (uint8_t)(s->boot + 1);
-  return meta_save(s);
+  s->boot_unsaved = 1;
+  return 0;
 }
 
 int pd_store_append(struct pd_store* s, const struct pd_record* recs, uint32_t n) {
@@ -130,6 +133,11 @@ int pd_store_append(struct pd_store* s, const struct pd_record* recs, uint32_t n
     }
     done += run;
     s->written += run;
+  }
+  if (s->boot_unsaved) {
+    if (meta_save(s) == 0) {
+      s->boot_unsaved = 0;
+    }
   }
   return 0;
 }
