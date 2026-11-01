@@ -13,7 +13,7 @@ from .coordinator import PinedogCoordinator
 from .entity import PinedogEntity
 
 PINEDOG_ONLY = {"walking", "pending"}
-BASELINE_OPTIONS = ["learning", "below", "normal", "above"]
+BASELINE_OPTIONS = ["learning", "waiting", "below", "normal", "above"]
 
 
 async def async_setup_entry(
