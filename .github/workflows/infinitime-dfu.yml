@@ -78,15 +78,15 @@ jobs:
           # official Arm GNU Toolchain 10.3-2021.10 (arm10), which is what upstream builds with.
           set -e
           link=/opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi
+          mv "$link" "$link.unused"
           if [ "${{ matrix.toolchain }}" = apt ]; then
-            mv "$link" "$link.unused"
             ln -s /usr "$link"
           else
             curl -sSL -o /tmp/arm-10.tar.bz2 https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2
             sha256sum /tmp/arm-10.tar.bz2
             mkdir -p /opt/arm10
             tar -xjf /tmp/arm-10.tar.bz2 -C /opt/arm10 --strip-components=1
-            ln -sfn /opt/arm10 "$link"
+            ln -s /opt/arm10 "$link"
           fi
           "$link/bin/arm-none-eabi-gcc" --version | head -n 1
 
