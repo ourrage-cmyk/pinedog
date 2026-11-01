@@ -19,4 +19,14 @@ cp "$here"/pinedog/pd_core.c "$here"/pinedog/pd_core.h \
 
 git -C "$target" apply --check "$here/glue.patch"
 git -C "$target" apply "$here/glue.patch"
+
+# Trim the FreeRTOS heap by 2 KB. The main app overflows the 64 KB RAM region
+# by about 0.4 KB on the image's toolchain; the stock tree overflows too, so this
+# is the RAM every 1.14.1 build on this image needs. Fail loudly if upstream's
+# line is not the one we expect, so the trim can never silently not apply.
+heap="$target/src/FreeRTOSConfig.h"
+grep -q '^#define configTOTAL_HEAP_SIZE[[:space:]]*(1024 \* 40)$' "$heap" \
+  || { echo "unexpected configTOTAL_HEAP_SIZE in $heap" >&2; exit 1; }
+sed -i 's/^\(#define configTOTAL_HEAP_SIZE[[:space:]]*\)(1024 \* 40)$/\1(1024 * 38)/' "$heap"
+
 echo "Pinedog port applied to $(git -C "$target" describe --tags --always 2>/dev/null || echo "$target")"
