@@ -14,7 +14,8 @@
         "description": "Choose the watch from the Bluetooth devices the Pi can hear. Likely watches are listed first.",
         "data": {
           "address": "Device",
-          "manual_address": "Or enter its address"
+          "manual_address": "Or enter its address",
+          "dog_name": "Dog's name (optional, e.g. Kida or Bridget)"
         }
       }
     },
