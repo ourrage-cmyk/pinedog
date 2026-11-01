@@ -1,4 +1,5 @@
 #include "components/pinedog/PinedogService.h"
+#include "components/pinedog/PinedogName.h"
 
 #include <chrono>
 #include <cstring>
@@ -7,12 +8,29 @@
 #include <host/ble_hs_mbuf.h>
 #include <nrf_log.h>
 #include <os/os_mbuf.h>
+#include <nrf.h>
 
 #include "components/battery/BatteryController.h"
 #include "components/datetime/DateTimeController.h"
 #include "components/fs/FS.h"
+#include "components/firmwarevalidator/FirmwareValidator.h"
 
 using namespace Pinetime::Pinedog;
+
+namespace Pinetime {
+  namespace Pinedog {
+    namespace {
+      // Copy of the saved dog name for other screens. Only the system task writes it.
+      char gDogName[17] = "Pinedog";
+    }
+    const char* DogName() {
+      return gDogName;
+    }
+    uint32_t LastBootStep() {
+      return NRF_POWER->GPREGRET; // survives a watchdog reset, so it shows where the last boot stopped
+    }
+  }
+}
 
 namespace {
   constexpr uint8_t kProtocolVersion = 2;
@@ -36,6 +54,8 @@ namespace {
   constexpr ble_uuid128_t requestUuid {CharUuid(0x03)};
   constexpr ble_uuid128_t recordsUuid {CharUuid(0x04)};
   constexpr ble_uuid128_t ackUuid {CharUuid(0x05)};
+  constexpr ble_uuid128_t validateUuid {CharUuid(0x06)};
+  constexpr ble_uuid128_t nameUuid {CharUuid(0x07)};
 
   // Filesystem adapter for the store. Each call opens, uses and closes its file.
   // LittleFS commits on close, which is the sync point the store relies on.
@@ -124,7 +144,11 @@ void PinedogService::Init() {
                         .flags = BLE_GATT_CHR_F_NOTIFY, .val_handle = &recordsHandle};
   characteristics[4] = {.uuid = &ackUuid.u, .access_cb = OnAccessCallback, .arg = this,
                         .flags = BLE_GATT_CHR_F_WRITE, .val_handle = &ackHandle};
-  characteristics[5] = {0};
+  characteristics[5] = {.uuid = &validateUuid.u, .access_cb = OnAccessCallback, .arg = this,
+                        .flags = BLE_GATT_CHR_F_WRITE, .val_handle = &validateHandle};
+  characteristics[6] = {.uuid = &nameUuid.u, .access_cb = OnAccessCallback, .arg = this,
+                        .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE, .val_handle = &nameHandle};
+  characteristics[7] = {0};
 
   services[0] = {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &kServiceUuid.u, .characteristics = characteristics};
   services[1] = {0};
@@ -141,6 +165,13 @@ void PinedogService::Init() {
 }
 
 void PinedogService::Start() {
+  // Boot must not depend on the filesystem. The store opens from Tick, a few seconds
+  // after boot, through OpenStore().
+}
+
+void PinedogService::OpenStore() {
+  storeOpenTried = true;
+  NRF_POWER->GPREGRET = 0x10; // before the filesystem work
   pd_fs ops {};
   ops.ctx = &fs;
   ops.append = FsAppend;
@@ -154,9 +185,41 @@ void PinedogService::Start() {
   storeReady = pd_store_open(&store, &ops) == 0;
   if (!storeReady) {
     NRF_LOG_ERROR("pinedog: store open failed");
+    NRF_POWER->GPREGRET = 0x12;
     return;
   }
   statusPending.store(pd_store_pending(&store));
+  LoadName();
+  NRF_POWER->GPREGRET = 0x11; // store open and name loaded
+}
+
+void PinedogService::SaveName() {
+  lfs_file_t file;
+  if (fs.FileOpen(&file, "/pinedog/name", LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC) < 0) {
+    return;
+  }
+  const uint8_t len = nameIncomingLen.load();
+  fs.FileWrite(&file, reinterpret_cast<const uint8_t*>(nameIncoming), len);
+  fs.FileClose(&file);
+  std::memcpy(nameSaved, nameIncoming, len);
+  nameSavedLen = len;
+  std::memcpy(gDogName, nameIncoming, len);
+  gDogName[len] = '\0';
+}
+
+void PinedogService::LoadName() {
+  // Keeps the default "Pinedog" when no name has been saved yet.
+  lfs_file_t file;
+  if (fs.FileOpen(&file, "/pinedog/name", LFS_O_RDONLY) < 0) {
+    return;
+  }
+  const int n = fs.FileRead(&file, reinterpret_cast<uint8_t*>(nameSaved), sizeof(nameSaved));
+  fs.FileClose(&file);
+  if (n > 0) {
+    nameSavedLen = static_cast<uint8_t>(n);
+    std::memcpy(gDogName, nameSaved, nameSavedLen);
+    gDogName[nameSavedLen] = '\0';
+  }
 }
 
 uint8_t PinedogService::BootId() const {
@@ -263,6 +326,9 @@ void PinedogService::PumpStream() {
 
 void PinedogService::Tick() {
   if (!storeReady) {
+    if (!storeOpenTried && dateTime.Uptime().count() >= 10) {
+      OpenStore();
+    }
     return;
   }
 
@@ -275,7 +341,9 @@ void PinedogService::Tick() {
     // Only the connection that asked for the stream may acknowledge it. The count is relative
     // to that snapshot. Repeats are harmless: once applied the stream is Idle, and the store
     // clamps to what was stored.
-    (void)pd_store_ack(&store, streamStart + ackValue.load());
+    if (pd_store_ack(&store, streamStart + ackValue.load()) == 0) {
+      ackedThisBoot = true;
+    }
     stream = Stream::Idle;
   }
 
@@ -289,6 +357,24 @@ void PinedogService::Tick() {
   } else if (pd_store_pending(&store) > kMaxPendingRecords) {
     // Only when no snapshot is being read: dropping segments under a stream would break it.
     (void)pd_store_ack(&store, store.written - kMaxPendingRecords);
+  }
+
+  if (namePending.exchange(false)) {
+    SaveName();
+  }
+  if (validatePending.exchange(false)) {
+    // The same routine as Settings > Firmware > Validate, triggered over BLE.
+    Controllers::FirmwareValidator validator;
+    validator.Validate();
+  }
+  // Self-confirm: after one full ack cycle this boot and an hour of uptime, confirm the
+  // image. A bad image never gets here or never acks, so it still rolls back on reboot.
+  if (ackedThisBoot && ++gateTicks >= 600) {
+    gateTicks = 0;
+    Controllers::FirmwareValidator validator;
+    if (!validator.IsValidated() && dateTime.Uptime().count() >= 3600) {
+      validator.Validate();
+    }
   }
 
   if (batchCount >= kBatchRecords) {
@@ -315,6 +401,11 @@ int PinedogService::OnAccess(uint16_t connHandle, uint16_t attrHandle, struct bl
     return (res == 0) ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
   }
 
+  if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR && attrHandle == nameHandle) {
+    int res = os_mbuf_append(ctxt->om, nameSaved, nameSavedLen);
+    return (res == 0) ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+  }
+
   if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
     return BLE_ATT_ERR_UNLIKELY;
   }
@@ -324,6 +415,22 @@ int PinedogService::OnAccess(uint16_t connHandle, uint16_t attrHandle, struct bl
     // The payload is ignored: a Request always streams the whole pending log.
     requestConn.store(connHandle);
     requestPending.store(true);
+    return 0;
+  }
+
+  if (attrHandle == validateHandle) {
+    validatePending.store(true);
+    return 0;
+  }
+  if (attrHandle == nameHandle) {
+    // The name is held in nameIncoming until the system task saves it. A second write
+    // that lands during the save can mix bytes; the next write fixes it.
+    if (len == 0 || len > sizeof(nameIncoming)) {
+      return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    }
+    os_mbuf_copydata(ctxt->om, 0, len, nameIncoming);
+    nameIncomingLen.store(static_cast<uint8_t>(len));
+    namePending.store(true);
     return 0;
   }
 

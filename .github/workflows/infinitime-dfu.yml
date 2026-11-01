@@ -29,6 +29,12 @@ jobs:
   build-dfu:
     needs: host-tests
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # apt: Ubuntu's gcc-arm-none-eabi plus newlib (the current build).
+        # arm10: the official Arm GNU Toolchain 10.3-2021.10 tarball, as upstream builds.
+        toolchain: [apt, arm10]
     container:
       image: infinitime/infinitime-build
     steps:
@@ -56,20 +62,35 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           bash pinedog/firmware/infinitime/apply.sh infinitime
+        env:
+          PINEDOG_REV: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install resource build dependencies
         run: |
           apt-get update
-          apt-get -y install --no-install-recommends python3-pil gcc-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
+          apt-get -y install --no-install-recommends python3-pil
+          if [ "${{ matrix.toolchain }}" = apt ]; then
+            apt-get -y install --no-install-recommends gcc-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
+          fi
 
       - name: Point the image toolchain at GCC 10.3
         run: |
-          # /opt/build.sh links with the image's GCC 15.3 no matter what PATH says.
-          # 1.14.1 targets GCC 10.3 (apt gcc-arm-none-eabi 10.3-2021.10), so the
-          # image's toolchain directory is moved aside and replaced with a link to /usr.
-          mv /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi.unused
-          ln -s /usr /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi
-          /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc --version | head -n 1
+          # /opt/build.sh links with the image's GCC 15.3 no matter what PATH says, so the
+          # image's toolchain path is replaced: with a link to apt's GCC (apt), or with the
+          # official Arm GNU Toolchain 10.3-2021.10 (arm10), which is what upstream builds with.
+          set -e
+          link=/opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi
+          mv "$link" "$link.unused"
+          if [ "${{ matrix.toolchain }}" = apt ]; then
+            ln -s /usr "$link"
+          else
+            curl -sSL -o /tmp/arm-10.tar.bz2 https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2
+            sha256sum /tmp/arm-10.tar.bz2
+            mkdir -p /opt/arm10
+            tar -xjf /tmp/arm-10.tar.bz2 -C /opt/arm10 --strip-components=1
+            ln -s /opt/arm10 "$link"
+          fi
+          "$link/bin/arm-none-eabi-gcc" --version | head -n 1
 
       - name: Build
         env:
@@ -92,25 +113,102 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Build stock app for a RAM baseline (diagnostic)
+      - name: Build the control image (stock 1.14.1 with only the heap trim)
         if: always()
         continue-on-error: true
         env:
           SOURCES_DIR: ${{ github.workspace }}/infinitime-stock
         run: |
-          /opt/build.sh all || true
-          arm-none-eabi-size infinitime-stock/build/src/pinetime-mcuboot-app.out || true
+          # Unmodified stock 1.14.1 does not link on this toolchain: the linker reports the
+          # RAM region overflowed with stack (64872 B used of 64 KB). The control therefore keeps the one change
+          # apply.sh makes to the heap and nothing else, so it isolates the Pinedog code.
+          heap=infinitime-stock/src/FreeRTOSConfig.h
+          grep -q '^#define configTOTAL_HEAP_SIZE[[:space:]]*(1024 \* 40)$' "$heap"
+          sed -i 's/^\(#define configTOTAL_HEAP_SIZE[[:space:]]*\)(1024 \* 40)$/\1(1024 * 38)/' "$heap"
+          /opt/build.sh all
+          arm-none-eabi-size infinitime-stock/build/output/src/pinetime-mcuboot-app-1.14.1.out || true
+          mkdir -p control
+          cp infinitime-stock/build/output/pinetime-mcuboot-app-dfu-*.zip \
+             control/pinedog-control-stock-1.14.1-heaptrim-dfu.zip
 
-      - name: Name the DFU zip
+      - name: Fetch the official 1.14.1 DFU zip for comparison
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p official
+          url=$(curl -sSL https://api.github.com/repos/InfiniTimeOrg/InfiniTime/releases/tags/1.14.1 \
+            | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["assets"] if "dfu" in x["name"].lower() and x["name"].endswith(".zip")]; print(a[0]["browser_download_url"] if a else "")')
+          echo "official asset: ${url:-none}"
+          [ -n "$url" ] && curl -sSL -o official/official-1.14.1-dfu.zip "$url"
+
+      - name: Name the DFU zips
         run: |
           mkdir -p out
           src=$(ls infinitime/build/output/pinetime-mcuboot-app-dfu-*.zip | head -n 1)
-          cp "$src" "out/pinedog-infinitime-${{ steps.pin.outputs.tag }}-dfu.zip"
+          cp "$src" "out/pinedog-infinitime-${{ steps.pin.outputs.tag }}-${{ matrix.toolchain }}-dfu.zip"
+          cp control/*.zip out/ 2>/dev/null || echo "control image was not built"
+          cp official/*.zip out/ 2>/dev/null || echo "official zip was not fetched"
           cd out && sha256sum *.zip > SHA256SUMS && cat SHA256SUMS
+
+      - name: Print MCUboot headers and manifests
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob, struct, zipfile
+          for path in sorted(glob.glob('out/*.zip')):
+              print('==', path)
+              with zipfile.ZipFile(path) as z:
+                  print(z.read('manifest.json').decode()[:600])
+                  for name in z.namelist():
+                      if not name.endswith('.bin'):
+                          continue
+                      data = z.read(name)
+                      magic, load, hdr, prot, size, flags = struct.unpack_from('<IIHHII', data, 0)
+                      major, minor, rev, build = struct.unpack_from('<BBHI', data, 20)
+                      print(f'{name}: bytes={len(data)} magic=0x{magic:08x} load=0x{load:08x} '
+                            f'hdr={hdr} protect={prot} img_size={size} flags=0x{flags:x} '
+                            f'version={major}.{minor}.{rev}+{build}')
+          PY
 
       - name: Upload DFU zip
         uses: actions/upload-artifact@v4
         with:
-          name: pinedog-infinitime-dfu
+          name: pinedog-infinitime-dfu-${{ matrix.toolchain }}
           path: out/
           if-no-files-found: error
+
+  publish:
+    # Publishes each commit's DFU sets as a public pre-release, so the laptop can fetch
+    # them with curl and no GitHub login. Runs even if one toolchain variant failed.
+    needs: build-dfu
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the DFU sets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pinedog-infinitime-dfu-*
+          path: sets
+
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REV: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -e
+          tag="nightly-${REV:0:7}"
+          mkdir -p release
+          for d in sets/*/; do
+            v=${d%/}; v=${v##*-}
+            for f in "$d"*.zip; do
+              cp "$f" "release/$v-$(basename "$f")"
+            done
+          done
+          cd release && sha256sum *.zip > SHA256SUMS && cat SHA256SUMS && cd ..
+          gh release create "$tag" --prerelease --target "$REV" --title "Pinedog nightly ${REV:0:7}" \
+            --notes "InfiniTime 1.14.1 with the Pinedog port, built from $REV. Variants: apt (Ubuntu GCC 10.3) and arm10 (official Arm GNU Toolchain 10.3-2021.10). Each zip is prefixed with its variant; SHA256SUMS lists them all." \
+            release/*.zip release/SHA256SUMS \
+          || gh release upload "$tag" release/*.zip release/SHA256SUMS --clobber
