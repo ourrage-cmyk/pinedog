@@ -50,6 +50,29 @@ grep -q '^if(DEFINED ENABLE_USERAPPS)' "$apps_cm" \
   cat "$apps_cm"
 } > "$apps_cm.tmp" && mv "$apps_cm.tmp" "$apps_cm"
 
+# Register the Pinedog GATT service before GATT starts. NimBLE refuses services once
+# ble_gatts_start() has run (BLE_HS_EBUSY), and NimbleController::Init() starts GATT. The glue
+# had it after nimbleController.Init(), so the service never registered. Move it in place.
+nimble_cpp="$target/src/components/ble/NimbleController.cpp"
+systemtask_cpp="$target/src/systemtask/SystemTask.cpp"
+python3 - "$nimble_cpp" "$systemtask_cpp" <<'PY2'
+import sys
+nimble, systemtask = sys.argv[1], sys.argv[2]
+n = open(nimble).read()
+old = "  rc = ble_gatts_start();\n  ASSERT(rc == 0);"
+assert n.count(old) == 1, "ble_gatts_start anchor not found once"
+n = n.replace(old, "  pinedogService.Init();\n" + old)
+decl = "void NimbleController::Init() {"
+assert n.count(decl) == 1, "NimbleController::Init not found once"
+n = n.replace(decl, "extern Pinetime::Pinedog::PinedogService pinedogService;\n\n" + decl)
+open(nimble, "w").write(n)
+t = open(systemtask).read()
+old2 = "  pinedogService.Init();\n  pinedogService.Start();"
+assert t.count(old2) == 1, "SystemTask Init/Start anchor not found once"
+t = t.replace(old2, "  pinedogService.Start();")
+open(systemtask, "w").write(t)
+PY2
+
 # Give this build a distinct Device Information firmware revision, so a flashed Pinedog
 # image can be told from stock 1.14.1 over BLE. PINEDOG_REV (the commit) sets the suffix.
 rev="${PINEDOG_REV:-dev}"; rev="${rev:0:7}"
