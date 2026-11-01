@@ -92,6 +92,11 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Find the Validate routine in stock 1.14.1 (diagnostic)
+        if: always()
+        run: |
+          grep -rn -i "img_confirmed\|boot_write_img\|validate" infinitime-stock/src --include=*.cpp --include=*.h --include=*.c | grep -v "libs/" | head -80 || true
+
       - name: Build stock app for a RAM baseline (diagnostic)
         if: always()
         continue-on-error: true
