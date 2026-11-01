@@ -63,7 +63,7 @@ jobs:
           git config --global --add safe.directory '*'
           bash pinedog/firmware/infinitime/apply.sh infinitime
         env:
-          PINEDOG_REV: ${{ github.sha }}
+          PINEDOG_REV: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install resource build dependencies
         run: |
@@ -195,7 +195,8 @@ jobs:
       - name: Publish the pre-release
         env:
           GH_TOKEN: ${{ github.token }}
-          REV: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+          REV: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -e
           tag="nightly-${REV:0:7}"
