@@ -60,12 +60,22 @@ jobs:
       - name: Install resource build dependencies
         run: |
           apt-get update
-          apt-get -y install --no-install-recommends python3-pil
+          apt-get -y install --no-install-recommends python3-pil gcc-arm-none-eabi
+
+      - name: Show toolchain
+        run: |
+          # 1.14.1 targets GCC 10.3 (gcc-arm-none-eabi 10.3-2021.10 from apt);
+          # the image's /opt toolchain is GCC 15.3, which fails -Werror and uses more RAM.
+          export PATH=/usr/bin:$PATH
+          arm-none-eabi-gcc --version | head -n 1
 
       - name: Build
         env:
           SOURCES_DIR: ${{ github.workspace }}/infinitime
-        run: /opt/build.sh all
+        run: |
+          export PATH=/usr/bin:$PATH
+          arm-none-eabi-gcc --version | head -n 1
+          /opt/build.sh all
 
       - name: Report flash and RAM use
         if: always()
