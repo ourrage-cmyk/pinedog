@@ -1,0 +1,116 @@
+name: InfiniTime store-and-sync DFU
+
+# Builds InfiniTime (pinned in firmware/infinitime/UPSTREAM) with the Pinedog
+# patch applied, and attaches a standard MCUboot DFU zip. The zip installs over
+# Bluetooth with nRF Connect or Gadgetbridge. No SWD, no bootloader changes.
+
+on:
+  push:
+    paths:
+      - 'firmware/infinitime/**'
+      - '.github/workflows/infinitime-dfu.yml'
+  pull_request:
+    paths:
+      - 'firmware/infinitime/**'
+      - '.github/workflows/infinitime-dfu.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run store and core tests on the host
+        run: make -C firmware/infinitime/test run
+
+  build-dfu:
+    needs: host-tests
+    runs-on: ubuntu-22.04
+    container:
+      image: infinitime/infinitime-build
+    steps:
+      - name: Checkout Pinedog
+        uses: actions/checkout@v4
+        with:
+          path: pinedog
+
+      - name: Read pinned InfiniTime
+        id: pin
+        run: |
+          echo "sha=$(sed -n 's/^commit //p' pinedog/firmware/infinitime/UPSTREAM)" >> "$GITHUB_OUTPUT"
+          echo "tag=$(sed -n 's/^InfiniTimeOrg\/InfiniTime tag //p' pinedog/firmware/infinitime/UPSTREAM)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout InfiniTime at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: InfiniTimeOrg/InfiniTime
+          ref: ${{ steps.pin.outputs.sha }}
+          path: infinitime
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Apply the Pinedog port
+        run: |
+          git config --global --add safe.directory '*'
+          bash pinedog/firmware/infinitime/apply.sh infinitime
+
+      - name: Install resource build dependencies
+        run: |
+          apt-get update
+          apt-get -y install --no-install-recommends python3-pil gcc-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
+
+      - name: Point the image toolchain at GCC 10.3
+        run: |
+          # /opt/build.sh links with the image's GCC 15.3 no matter what PATH says.
+          # 1.14.1 targets GCC 10.3 (apt gcc-arm-none-eabi 10.3-2021.10), so the
+          # image's toolchain directory is moved aside and replaced with a link to /usr.
+          mv /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi.unused
+          ln -s /usr /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi
+          /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc --version | head -n 1
+
+      - name: Build
+        env:
+          SOURCES_DIR: ${{ github.workspace }}/infinitime
+        run: /opt/build.sh all
+
+      - name: Report flash and RAM use
+        if: always()
+        run: |
+          arm-none-eabi-size infinitime/build/src/pinetime-mcuboot-app.out || true
+          arm-none-eabi-nm --size-sort -S --radix=d infinitime/build/src/pinetime-mcuboot-app.out | awk '$3 ~ /[bBdD]/' | tail -n 25 || true
+
+      - name: Checkout stock InfiniTime for a RAM baseline (diagnostic)
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          repository: InfiniTimeOrg/InfiniTime
+          ref: ${{ steps.pin.outputs.sha }}
+          path: infinitime-stock
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Build stock app for a RAM baseline (diagnostic)
+        if: always()
+        continue-on-error: true
+        env:
+          SOURCES_DIR: ${{ github.workspace }}/infinitime-stock
+        run: |
+          /opt/build.sh all || true
+          arm-none-eabi-size infinitime-stock/build/src/pinetime-mcuboot-app.out || true
+
+      - name: Name the DFU zip
+        run: |
+          mkdir -p out
+          src=$(ls infinitime/build/output/pinetime-mcuboot-app-dfu-*.zip | head -n 1)
+          cp "$src" "out/pinedog-infinitime-${{ steps.pin.outputs.tag }}-dfu.zip"
+          cd out && sha256sum *.zip > SHA256SUMS && cat SHA256SUMS
+
+      - name: Upload DFU zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: pinedog-infinitime-dfu
+          path: out/
+          if-no-files-found: error
