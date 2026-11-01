@@ -1,4 +1,5 @@
 #include "components/pinedog/PinedogService.h"
+#include "components/pinedog/PinedogName.h"
 
 #include <chrono>
 #include <cstring>
@@ -14,6 +15,18 @@
 #include "components/firmwarevalidator/FirmwareValidator.h"
 
 using namespace Pinetime::Pinedog;
+
+namespace Pinetime {
+  namespace Pinedog {
+    namespace {
+      // Copy of the saved dog name for other screens. Only the system task writes it.
+      char gDogName[17] = "Pinedog";
+    }
+    const char* DogName() {
+      return gDogName;
+    }
+  }
+}
 
 namespace {
   constexpr uint8_t kProtocolVersion = 2;
@@ -177,6 +190,8 @@ void PinedogService::SaveName() {
   fs.FileClose(&file);
   std::memcpy(nameSaved, nameIncoming, len);
   nameSavedLen = len;
+  std::memcpy(gDogName, nameIncoming, len);
+  gDogName[len] = '\0';
 }
 
 void PinedogService::LoadName() {
@@ -189,6 +204,8 @@ void PinedogService::LoadName() {
   fs.FileClose(&file);
   if (n > 0) {
     nameSavedLen = static_cast<uint8_t>(n);
+    std::memcpy(gDogName, nameSaved, nameSavedLen);
+    gDogName[nameSavedLen] = '\0';
   }
 }
 
