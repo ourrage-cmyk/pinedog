@@ -62,20 +62,19 @@ jobs:
           apt-get update
           apt-get -y install --no-install-recommends python3-pil gcc-arm-none-eabi
 
-      - name: Show toolchain
+      - name: Point the image toolchain at GCC 10.3
         run: |
-          # 1.14.1 targets GCC 10.3 (gcc-arm-none-eabi 10.3-2021.10 from apt);
-          # the image's /opt toolchain is GCC 15.3, which fails -Werror and uses more RAM.
-          export PATH=/usr/bin:$PATH
-          arm-none-eabi-gcc --version | head -n 1
+          # /opt/build.sh links with the image's GCC 15.3 no matter what PATH says.
+          # 1.14.1 targets GCC 10.3 (apt gcc-arm-none-eabi 10.3-2021.10), so the
+          # image's toolchain directory is moved aside and replaced with a link to /usr.
+          mv /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi.unused
+          ln -s /usr /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi
+          /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc --version | head -n 1
 
       - name: Build
         env:
           SOURCES_DIR: ${{ github.workspace }}/infinitime
-        run: |
-          export PATH=/usr/bin:$PATH
-          arm-none-eabi-gcc --version | head -n 1
-          /opt/build.sh all
+        run: /opt/build.sh all
 
       - name: Report flash and RAM use
         if: always()
