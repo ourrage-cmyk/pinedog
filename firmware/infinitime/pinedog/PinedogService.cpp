@@ -271,9 +271,10 @@ void PinedogService::Tick() {
     dateTime.SetCurrentTime(std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>(t));
   }
 
-  if (ackPending.exchange(false) && stream == Stream::Done) {
-    // The count is relative to the snapshot that was just finished. Repeats are harmless:
-    // once applied the stream is Idle, and the store clamps to what was stored.
+  if (ackPending.exchange(false) && stream == Stream::Done && ackConn.load() == streamConn) {
+    // Only the connection that asked for the stream may acknowledge it. The count is relative
+    // to that snapshot. Repeats are harmless: once applied the stream is Idle, and the store
+    // clamps to what was stored.
     (void)pd_store_ack(&store, streamStart + ackValue.load());
     stream = Stream::Idle;
   }
@@ -337,6 +338,7 @@ int PinedogService::OnAccess(uint16_t connHandle, uint16_t attrHandle, struct bl
       timePending.store(true);
     } else {
       ackValue.store(word);
+      ackConn.store(connHandle);
       ackPending.store(true);
     }
     return 0;

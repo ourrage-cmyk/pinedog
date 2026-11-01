@@ -77,9 +77,9 @@ does not use them. They are sent when a Pinedog build runs again.
 
 ## Known limits of this build (unverified)
 
-- No pairing or encryption. A device in range that writes to the Ack
-  characteristic could make the watch drop records Home Assistant has not
-  stored. This is the main thing to fix before relying on it.
+- No pairing or encryption. Acks are accepted only from the connection that
+  requested the stream, which blocks stray writes but is not a security
+  boundary. A device that can open that connection could still remove records.
 - Battery life is not measured. Sampling uses the 100 ms motion tick that stock
   InfiniTime already runs, so the extra cost is flash writes, one every five
   minutes.

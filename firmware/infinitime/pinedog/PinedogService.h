@@ -88,6 +88,7 @@ namespace Pinetime {
       std::atomic<uint16_t> requestConn {0};
       std::atomic_bool ackPending {false};
       std::atomic<uint32_t> ackValue {0};
+      std::atomic<uint16_t> ackConn {0};
 
       // Published for Status reads.
       std::atomic<uint32_t> statusPending {0};

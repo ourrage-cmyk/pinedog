@@ -100,11 +100,13 @@ every 5 minutes or on each Request. A power cut loses at most that batch.
 - Advertising: the Pinedog UUID is in the scan response, not the advertisement,
   so the sync-window advertising (company id 0xFFFF) is not in this build.
   Home Assistant connects on its normal schedule.
-- No pairing or encryption yet: Time, Request and Ack are open writes, the same
-  as stock InfiniTime services. Anyone in range who writes Ack can drop
-  unacknowledged records. Before real use, the Ack write should require
-  encryption (bonding). That is not done here because it cannot be tested
-  without the hardware.
+- No pairing or encryption. Requiring an encrypted link would need bonding,
+  and InfiniTime pairs with a passkey shown on the watch, which Home Assistant
+  cannot enter, so it would block automatic sync. Instead, the watch only
+  accepts an Ack from the same connection that sent the Request. A stray write
+  from another device is ignored. This is not cryptographic: a device that can
+  open the same connection can still ack. The Request is open, so a device in
+  range can make the watch stream records, but cannot remove them.
 - Ack is only accepted after the end marker, and only once per snapshot.
 - Config (classifier thresholds over BLE) is not implemented, as in the
   Zephyr build.
