@@ -26,7 +26,7 @@ from .storage import STORE_VERSION, WoofStore
 _LOGGER = logging.getLogger(__name__)
 
 SHORT_TERM_DAYS = 14
-SAMPLE_SECONDS = 60.0  # motion window per poll; stands for the time since the last poll
+SAMPLE_SECONDS = 20.0  # motion window per poll (was 60 s); the notify radio and accelerometer run for this long each poll
 # Polls at most MAX_INTERVAL_S apart while the collar is in range, so every interval is credited.
 SUCCESS_INTERVAL = timedelta(seconds=MAX_INTERVAL_S)
 RETRY_INTERVAL = timedelta(minutes=2)
