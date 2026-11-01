@@ -14,6 +14,11 @@ on:
       - 'firmware/infinitime/**'
       - '.github/workflows/infinitime-dfu.yml'
   workflow_dispatch:
+    inputs:
+      apply_patch:
+        description: 'Apply the Pinedog port (set to false to build the pinned InfiniTime unmodified)'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -53,6 +58,7 @@ jobs:
           fetch-depth: 1
 
       - name: Apply the Pinedog port
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.apply_patch }}
         run: |
           git config --global --add safe.directory '*'
           bash pinedog/firmware/infinitime/apply.sh infinitime
