@@ -9,6 +9,7 @@ from bleak_retry_connector import establish_connection
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 
+from .ble_lock import BLE_LOCK
 from .protocol import ACK_UUID, RECORDS_UUID, REQUEST_UUID, STATUS_UUID, TIME_UUID, encode_u32
 from .transfer import PersistFn, TransferResult, run_transfer
 
@@ -55,17 +56,19 @@ async def async_pull_records(
     hass: HomeAssistant, address: str, persist: PersistFn
 ) -> TransferResult:
     """Connect, run one transfer, and disconnect."""
-    client = await establish_connection(BleakClient, _device(hass, address), "Pinedog", max_attempts=3)
-    try:
-        return await run_transfer(BleakLink(client), int(time.time()), persist)
-    finally:
-        await client.disconnect()
+    async with BLE_LOCK:
+        client = await establish_connection(BleakClient, _device(hass, address), "Pinedog", max_attempts=3)
+        try:
+            return await run_transfer(BleakLink(client), int(time.time()), persist)
+        finally:
+            await client.disconnect()
 
 
 async def async_pair(hass: HomeAssistant, address: str) -> None:
     """Bond with the watch. The watch only accepts pairing while its button window is open."""
-    client = await establish_connection(BleakClient, _device(hass, address), "Pinedog", max_attempts=3)
-    try:
-        await client.pair()
-    finally:
-        await client.disconnect()
+    async with BLE_LOCK:
+        client = await establish_connection(BleakClient, _device(hass, address), "Pinedog", max_attempts=3)
+        try:
+            await client.pair()
+        finally:
+            await client.disconnect()
