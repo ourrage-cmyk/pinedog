@@ -14,6 +14,7 @@ from bleak_retry_connector import establish_connection
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 
+from .ble_lock import BLE_LOCK
 from .stock_motion import BATTERY_LEVEL_UUID, MOTION_VALUES_UUID, decode_battery, decode_motion
 
 
@@ -37,6 +38,13 @@ async def async_read_watch(
 
     Battery and motion are each optional: if one fails, the other is still returned.
     """
+    async with BLE_LOCK:
+        return await _read_locked(hass, address, sample_seconds)
+
+
+async def _read_locked(
+    hass: HomeAssistant, address: str, sample_seconds: float
+) -> WatchReading:
     client = await establish_connection(
         BleakClient, _device(hass, address), "InfiniTime", max_attempts=3
     )
