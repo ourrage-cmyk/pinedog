@@ -215,4 +215,6 @@ class PinedogLastErrorSensor(PinedogEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        return self.coordinator.data.last_error
+        error = self.coordinator.data.last_error
+        # Home Assistant rejects states longer than 255 characters.
+        return None if error is None else error[:255]
