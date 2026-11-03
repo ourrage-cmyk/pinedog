@@ -18,7 +18,7 @@ from .storage import STORE_VERSION, WoofStore
 from .activity import NOT_WORN, Baseline, DailyTotals, Record, compute_baseline, daily_totals
 from .transfer import FUTURE_SLACK_MINUTES
 from .protocol import sync_requested
-from .schedule import should_attempt
+from .schedule import should_attempt, should_sync_on_return
 from .sync import async_pull_records
 from .transfer import IncompleteTransfer, TransferResult, stage_failure
 
@@ -67,6 +67,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         self._longterm = LongTerm()
         self._last_sync: datetime | None = None
         self._last_attempt: datetime | None = None
+        self._last_seen: datetime | None = None
         self._last_error: str | None = None
         self._battery_pct: int | None = None
         self._charging = False
@@ -250,13 +251,18 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
     def handle_advertisement(self, info: BluetoothServiceInfoBleak, change) -> None:
         """Start a sync when the watch is seen.
 
-        A button press on the watch sets a sync request in its advertisement. Then
-        the normal retry schedule is skipped. The watch advertises every 100 ms
+        A collar that was out of range and is back syncs at once, so a dog that
+        comes home from a run has its records in HA straight away. A dog that
+        stays in range does not. A button press on the watch sets a sync request
+        in its advertisement. Then the normal retry schedule is skipped too. The watch advertises every 100 ms
         in that window, so a sync already running is not started again.
         """
+        now = dt_util.utcnow()
+        returned = should_sync_on_return(now, self._last_seen, self._last_attempt)
+        self._last_seen = now
         if self._busy:
             return
-        if sync_requested(info.manufacturer_data):
+        if sync_requested(info.manufacturer_data) or returned:
             self._force_next = True
         elif not self._attempt_allowed():
             return
