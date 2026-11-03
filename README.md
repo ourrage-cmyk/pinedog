@@ -134,8 +134,10 @@ watch does not accept pairing outside a window opened by the button.
    the **Unsynced records** sensor. It should fall to 0.
 3. Check **Last sync error**. It should be empty.
 
-Without a button press, Home Assistant only tries about every 30 minutes after a
-success, or every 5 minutes after a failure.
+Without a button press, Home Assistant tries about every 30 minutes after a
+success, or every 5 minutes after a failure. When a collar comes back into range
+after being out of range for 5 minutes or more, for example after a run, it
+syncs straight away. A dog that stays in range does not trigger a sync.
 
 ### Sync now
 
