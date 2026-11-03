@@ -25,3 +25,19 @@ def should_attempt(
         return True
     interval = retry_interval if last_failed else success_interval
     return now - last_attempt >= interval
+
+
+# Watches take turns on the Pi's Bluetooth. A watch that synced this recently sits out,
+# so the next watch gets the connection slots.
+TURN_WINDOW = timedelta(minutes=30)
+
+
+def synced_recently(
+    now: datetime,
+    last_sync: datetime | None,
+    window: timedelta = TURN_WINDOW,
+) -> bool:
+    """True when this watch synced successfully within the window, so it can be skipped."""
+    if last_sync is None:
+        return False
+    return now - last_sync < window

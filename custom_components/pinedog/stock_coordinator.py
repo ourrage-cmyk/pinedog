@@ -18,7 +18,7 @@ from homeassistant.util import dt as dt_util
 
 from .activity import Baseline, compute_baseline
 from .coordinator import PinedogData
-from .schedule import should_attempt
+from .schedule import TURN_WINDOW, should_attempt, synced_recently
 from .stock_ble import async_read_watch
 from .stock_motion import DayLog, MAX_INTERVAL_S, activity_index
 from .storage import STORE_VERSION, WoofStore
@@ -53,7 +53,8 @@ class StockCoordinator(DataUpdateCoordinator[PinedogData]):
         self.data = self._build()
 
     async def _async_update_data(self) -> PinedogData:
-        if self._busy:
+        if self._busy or synced_recently(dt_util.utcnow(), self._last_sync):
+            # Another poll is running, or this collar synced inside its turn window.
             return self._build()
         self._busy = True
         self._last_attempt = dt_util.utcnow()
@@ -110,7 +111,7 @@ class StockCoordinator(DataUpdateCoordinator[PinedogData]):
 
         Advertisements arrive many times a second, so the schedule gate matters.
         """
-        if self._busy:
+        if self._busy or synced_recently(dt_util.utcnow(), self._last_sync, TURN_WINDOW):
             return
         if not should_attempt(
             dt_util.utcnow(),
