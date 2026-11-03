@@ -56,6 +56,8 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           bash pinedog/firmware/infinitime/apply.sh infinitime
+        env:
+          PINEDOG_REV: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install resource build dependencies
         run: |

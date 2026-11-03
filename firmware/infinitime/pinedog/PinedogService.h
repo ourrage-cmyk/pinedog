@@ -70,6 +70,9 @@ namespace Pinetime {
       uint8_t BootId() const;
       void StartStream(uint16_t connHandle);
       void PumpStream();
+      void SaveName();
+      void LoadName();
+      void OpenStore();
 
       Controllers::FS& fs;
       Controllers::DateTime& dateTime;
@@ -77,12 +80,24 @@ namespace Pinetime {
 
       pd_store store {};
       bool storeReady = false;
+      bool storeOpenTried = false;
       pd_config config {50, 300, 1200, 15, 30};
       pd_summary summary {};
       bool windowOpen = false;
       bool windowSynced = false;
       pd_record batch[16] {}; // kBatchRecords flushes; the rest is headroom while the flash refuses writes
       uint8_t batchCount = 0;
+
+      // Self-confirm and remote validate. The gate counts ticks between checks.
+      bool ackedThisBoot = false;
+      uint32_t gateTicks = 0;
+      std::atomic_bool validatePending {false};
+      // Dog name: written over BLE into nameIncoming, saved to LittleFS by the system task.
+      std::atomic_bool namePending {false};
+      char nameIncoming[16] {};
+      std::atomic<uint8_t> nameIncomingLen {0};
+      char nameSaved[16] {'P', 'i', 'n', 'e', 'd', 'o', 'g'};
+      uint8_t nameSavedLen = 7;
 
       // Set by GATT callbacks (NimBLE host context), read in Tick().
       std::atomic_bool timePending {false};
@@ -113,7 +128,9 @@ namespace Pinetime {
       uint16_t requestHandle = 0;
       uint16_t recordsHandle = 0;
       uint16_t ackHandle = 0;
-      struct ble_gatt_chr_def characteristics[6];
+      uint16_t validateHandle = 0;
+      uint16_t nameHandle = 0;
+      struct ble_gatt_chr_def characteristics[8];
       struct ble_gatt_svc_def services[2];
     };
   }
