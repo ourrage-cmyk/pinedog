@@ -9,24 +9,25 @@ _pkg = types.ModuleType("pinedog")
 _pkg.__path__ = [str(PKG_DIR)]
 sys.modules["pinedog"] = _pkg
 
-from pinedog.schedule import TURN_WINDOW, synced_recently  # noqa: E402
+from pinedog.schedule import synced_recently  # noqa: E402
+from pinedog.stock_motion import MAX_INTERVAL_S as STOCK_CAP_S  # noqa: E402
 
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
+WINDOW = timedelta(seconds=STOCK_CAP_S)
 
 
 def test_never_synced_goes_first():
-    assert not synced_recently(NOW, None)
+    assert not synced_recently(NOW, None, WINDOW)
 
 
 def test_synced_inside_window_is_skipped():
-    assert synced_recently(NOW, NOW - timedelta(minutes=10))
-    assert synced_recently(NOW, NOW - timedelta(minutes=29, seconds=59))
+    assert synced_recently(NOW, NOW - timedelta(minutes=5), WINDOW)
 
 
 def test_synced_outside_window_gets_its_turn():
-    assert not synced_recently(NOW, NOW - TURN_WINDOW)
-    assert not synced_recently(NOW, NOW - timedelta(minutes=45))
+    assert not synced_recently(NOW, NOW - WINDOW, WINDOW)
 
 
-def test_turn_window_is_thirty_minutes():
-    assert TURN_WINDOW == timedelta(minutes=30)
+def test_turn_window_never_exceeds_motion_cap():
+    # A skip must not stretch the gap between credited polls past the cap.
+    assert STOCK_CAP_S == 600

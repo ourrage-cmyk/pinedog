@@ -27,17 +27,13 @@ def should_attempt(
     return now - last_attempt >= interval
 
 
-# Watches take turns on the Pi's Bluetooth. A watch that synced this recently sits out,
-# so the next watch gets the connection slots.
-TURN_WINDOW = timedelta(minutes=30)
 
+def synced_recently(now: datetime, last_sync: datetime | None, window: timedelta) -> bool:
+    """True when this watch synced successfully within the window, so it can be skipped.
 
-def synced_recently(
-    now: datetime,
-    last_sync: datetime | None,
-    window: timedelta = TURN_WINDOW,
-) -> bool:
-    """True when this watch synced successfully within the window, so it can be skipped."""
+    Stock collars use the motion cap as the window. Any longer gap between syncs is
+    credited as unknown, not as motion, so a skip must never stretch the gap past the cap.
+    """
     if last_sync is None:
         return False
     return now - last_sync < window
