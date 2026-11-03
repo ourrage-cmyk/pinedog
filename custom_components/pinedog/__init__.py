@@ -5,17 +5,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Union
 
+import voluptuous as vol
+
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import BluetoothScanningMode
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 
-from .const import FIRMWARE_PINEDOG, FIRMWARE_STOCK
+from .const import DOMAIN, FIRMWARE_PINEDOG, FIRMWARE_STOCK
 from .coordinator import PinedogCoordinator
 from .protocol import SERVICE_UUID
 from .stock_coordinator import StockCoordinator
 
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "button"]
+SERVICE_SYNC_NOW = "sync_now"
+SYNC_NOW_SCHEMA = vol.Schema({vol.Optional("entity_id"): cv.entity_ids})
 
 
 @dataclass
@@ -24,6 +30,41 @@ class PinedogRuntime:
 
 
 type PinedogConfigEntry = ConfigEntry[PinedogRuntime]
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    async def _handle_sync_now(call: ServiceCall) -> dict:
+        entries = _entries_for_call(hass, call)
+        collars = []
+        for entry in entries:
+            outcome = await entry.runtime_data.coordinator.async_sync_now()
+            collars.append({"name": entry.data.get("dog_name") or entry.data["address"], **outcome})
+        return {"collars": collars}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SYNC_NOW,
+        _handle_sync_now,
+        schema=SYNC_NOW_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    return True
+
+
+def _entries_for_call(hass: HomeAssistant, call: ServiceCall) -> list[PinedogConfigEntry]:
+    """The loaded custom-firmware collars the call names, or all of them when no target is given."""
+    loaded = [
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.state is ConfigEntryState.LOADED
+        and entry.data.get("firmware", FIRMWARE_PINEDOG) == FIRMWARE_PINEDOG
+    ]
+    targets = call.data.get("entity_id")
+    if not targets:
+        return loaded
+    registry = er.async_get(hass)
+    wanted = {registry.async_get(entity_id).config_entry_id for entity_id in targets if registry.async_get(entity_id)}
+    return [entry for entry in loaded if entry.entry_id in wanted]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> bool:

@@ -41,12 +41,53 @@ class Link(Protocol):
     async def write_ack(self, count: int) -> None: ...
 
 
-class IncompleteTransfer(RuntimeError):
+class SyncFailed(RuntimeError):
+    """A sync that stopped at a known stage. str() is the one-line reason the UI shows.
+
+    Stages, in the order a sync reaches them: "not seen" (no advertisement in range),
+    "connect", "GATT" (a read, write or subscribe failed), "clock", "transfer" (no end
+    of stream, or fewer records than the watch reported), "store" (our side failed
+    before the ack). "error" is anything else.
+    """
+
+    def __init__(self, stage: str, detail: str) -> None:
+        super().__init__(f"{stage}: {detail}")
+        self.stage = stage
+        self.detail = detail
+
+
+class IncompleteTransfer(SyncFailed):
     """The watch sent fewer records than it had, so nothing was acked."""
 
+    def __init__(self, detail: str) -> None:
+        super().__init__("transfer", detail)
 
-class ClockError(RuntimeError):
+
+class ClockError(SyncFailed):
     """Home Assistant's own clock is not set, so no record can be placed in time."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__("clock", detail)
+
+
+class GattError(RuntimeError):
+    """A GATT read, write or subscribe failed on the link."""
+
+
+def describe(err: BaseException) -> str:
+    """The message of an error, or its type name when it has none (asyncio timeouts have none)."""
+    return str(err) or type(err).__name__
+
+
+def stage_failure(err: BaseException) -> SyncFailed:
+    """The SyncFailed for an error raised during a sync."""
+    if isinstance(err, SyncFailed):
+        return err
+    if isinstance(err, GattError):
+        return SyncFailed("GATT", describe(err))
+    if isinstance(err, TimeoutError):
+        return SyncFailed("transfer", f"no end of stream within {TRANSFER_TIMEOUT_S} s")
+    return SyncFailed("error", describe(err))
 
 
 @dataclass(frozen=True)
@@ -144,6 +185,9 @@ async def run_transfer(
         records.append(Record(minute, rec.counts, rec.activity_class))
 
     # Durable on our side first. Acking before this point could lose records.
-    await persist(records)
+    try:
+        await persist(records)
+    except Exception as err:  # noqa: BLE001 - name the stage, then let it propagate
+        raise SyncFailed("store", describe(err)) from err
     await link.write_ack(len(wire))
     return TransferResult(status, len(wire), len(records), corrupt, unplaced, acked=True)

@@ -15,7 +15,7 @@ sys.modules["pinedog"] = _pkg
 
 from pinedog.protocol import BOOT_SHIFT, UNSYNCED_FLAG, crc8  # noqa: E402
 from pinedog.schedule import RETRY_INTERVAL, SUCCESS_INTERVAL, should_attempt  # noqa: E402
-from pinedog.transfer import ClockError, place_unsynced, run_transfer  # noqa: E402
+from pinedog.transfer import ClockError, SyncFailed, place_unsynced, run_transfer  # noqa: E402
 from pinedog.protocol import decode_status  # noqa: E402
 
 STATUS = struct.Struct("<BBIIIBB")
@@ -102,8 +102,10 @@ def test_no_ack_when_persist_fails():
     async def persist(records):
         raise OSError("disk full")
 
-    with pytest.raises(OSError):
+    with pytest.raises(SyncFailed) as info:
         _run(link, persist)
+    assert info.value.stage == "store"
+    assert isinstance(info.value.__cause__, OSError)
     assert not any(c[0] == "ack" for c in link.calls)
 
 
