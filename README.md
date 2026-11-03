@@ -1,8 +1,9 @@
 # Pinedog
 
-> **Do not flash v0.2.0.** It never sends the records to Home Assistant, so no
-> data syncs. Use **v0.2.1** (`firmware/release/`). Its changes are listed in
-> `docs/FIRMWARE.md`.
+> **Current version: integration 0.4.0.** Both collars run the InfiniTime build
+> at commit `d47029c` (InfiniTime 1.14.1 with the Pinedog service). The SWD steps
+> below apply only to the older v0.2.1 Zephyr image, and are not needed for the
+> current collars. Do not flash v0.2.0: it never sends records to Home Assistant.
 
 Turns a first-generation PineTime into a dog activity logger. The watch
 records one motion summary per minute, stores it on the watch, and hands it to
@@ -29,10 +30,22 @@ custom repository:
 3. Paste `https://github.com/ourrage-cmyk/pinedog`, set the category to
    **Integration**, and click **Add**.
 4. Search for **Pinedog** in HACS, open it, and click **Download**. Choose the
-   latest version (v0.2.1 or newer).
+   latest version (0.4.0 or newer).
 5. Restart Home Assistant (Settings → System → Restart).
 6. Continue with [Step 6: pair the watch](#step-6-pair-the-watch). The watch
    still has to be flashed first (Steps 1–4).
+
+## Update to version 0.4.0 with HACS
+
+This update needs no flashing. Only Home Assistant changes.
+
+1. In Home Assistant, open **HACS → Integrations → Pinedog**. Click the refresh
+   icon at the top right if no update appears.
+2. If it shows **Update**, click it, then **Download**. If not, open the ⋮ menu
+   and choose **Redownload**, then pick version 0.4.0 or `main`.
+3. Restart Home Assistant fully: Settings → System → Restart. Reloading the
+   integration is not enough, because the new code loads only on restart.
+4. Check it works: see [How to check it works](#how-to-check-it-works).
 
 HACS needs Home Assistant 2025.1 or later and the Bluetooth integration. Home
 Assistant also needs a working Bluetooth adapter; see the list below.
@@ -159,6 +172,19 @@ The same service is available as `pinedog.sync_now`. Leave out the target to
 sync every collar, or pass button entities. It returns the outcome per collar,
 so you can call it from an automation or a script and read the result.
 
+The collars sync one at a time, because the Raspberry Pi's Bluetooth chip has
+few connection slots. A second collar waits for the first to finish.
+
+## How to check it works
+
+1. Settings → Devices & services → Pinedog: each collar has a **Sync now** button.
+2. Developer tools → Actions: search for `pinedog.sync_now`. It should be listed.
+3. Press **Sync now** on a collar. If it succeeds, **Last sync error** is empty.
+   If it fails, the notification names the stage, and the same text appears in
+   **Last sync error**.
+4. Take a collar out of range for 5 minutes or more, then bring it back. Its
+   **Last sync** should update on its own, without a button press.
+
 ## What you see on the watch
 
 The screen is off unless you press the button. A press shows:
@@ -206,6 +232,7 @@ are recorded as not worn and left out of the totals.
 | Pairing failed | Press the button, then submit within 60 seconds. |
 | Last sync error says insufficient encryption | The watch is not bonded to this Home Assistant. Repeat Step 6. |
 | Pending count never falls | Press **Sync now**. The error names the stage where the transfer stops. The Home Assistant log for `pinedog` has the same detail. |
+| No Sync now buttons after an update | Restart Home Assistant fully (Settings → System → Restart). A reload is not enough. |
 | Clock says NOT SET | Normal until the first successful sync. |
 | Watch resets often | Look at the boot count on the screen. The watchdog resets the chip if it hangs. Report the number and when it changed. |
 
@@ -250,14 +277,18 @@ validation workflow skips them, and brand assets, for that reason.
 
 ## Releasing a version
 
-The version lives in `custom_components/pinedog/manifest.json`. HACS installs a
-GitHub release, so each version needs a tag with the same number:
+The version lives in `custom_components/pinedog/manifest.json`. HACS offers the
+latest GitHub release when one exists, and otherwise tracks the default branch.
+Version 0.4.0 has no release tag yet, so HACS tracks `main` for it. To publish a
+release, follow these steps:
 
-1. Set `version` in `manifest.json` (for example `0.2.2`).
+1. Set `version` in `manifest.json` (for example `0.4.1`).
 2. Merge to the default branch.
-3. Tag and push: `git tag v0.2.2 && git push origin v0.2.2`.
+3. Tag and push: `git tag v0.4.1 && git push origin v0.4.1`.
 
 `release.yml` checks that the tag matches the manifest and creates the release.
+It attaches the firmware files in `firmware/release/`, so check that they match
+the release before you publish.
 `validate.yml` runs HACS and hassfest checks, plus the host tests, on every push.
 
 ## Repository layout
