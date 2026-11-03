@@ -41,3 +41,14 @@ def test_no_upgrade_when_nothing_is_advertised_yet():
     # Setup can run before the first advertisement is cached. The entry then stays stock
     # until a later advertisement carries the Pinedog service.
     assert detected_firmware(FIRMWARE_STOCK, None) == FIRMWARE_STOCK
+
+
+def test_gatt_table_with_pinedog_service_upgrades_a_stock_entry():
+    # Passive scans never see the scan response, so the upgrade reads the GATT table on connect.
+    gatt = ["00001801-0000-1000-8000-00805f9b34fb", SERVICE_UUID]
+    assert detected_firmware(FIRMWARE_STOCK, gatt) == FIRMWARE_PINEDOG
+
+
+def test_gatt_table_of_stock_infinitime_keeps_the_stock_entry():
+    gatt = ["00001801-0000-1000-8000-00805f9b34fb", "00001530-1212-efde-1523-785feabcd123"]
+    assert detected_firmware(FIRMWARE_STOCK, gatt) == FIRMWARE_STOCK

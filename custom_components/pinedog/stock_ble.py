@@ -22,6 +22,16 @@ from .stock_motion import BATTERY_LEVEL_UUID, MOTION_VALUES_UUID, decode_battery
 class WatchReading:
     battery_pct: int | None
     motion_samples: list[tuple[int, int, int]]
+    # Service UUIDs from the GATT table on connect. The Pinedog service is in the scan
+    # response, which a passive scan never receives, so this is the reliable check.
+    service_uuids: tuple[str, ...] = ()
+
+
+def _gatt_uuids(client: BleakClient) -> tuple[str, ...]:
+    try:
+        return tuple(str(service.uuid).lower() for service in client.services)
+    except Exception:  # noqa: BLE001 - the table is a hint, never a reason to fail a read
+        return ()
 
 
 def _device(hass: HomeAssistant, address: str):
@@ -70,6 +80,8 @@ async def _read_locked(
         except (BleakError, ValueError):
             pass
 
-        return WatchReading(battery_pct=battery, motion_samples=samples)
+        return WatchReading(
+            battery_pct=battery, motion_samples=samples, service_uuids=_gatt_uuids(client)
+        )
     finally:
         await client.disconnect()

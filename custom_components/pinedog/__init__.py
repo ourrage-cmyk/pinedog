@@ -37,7 +37,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> b
         hass.config_entries.async_update_entry(entry, data={**entry.data, "firmware": firmware})
     if firmware == FIRMWARE_STOCK:
         coordinator: Union[PinedogCoordinator, StockCoordinator] = StockCoordinator(
-            hass, address, entry.entry_id
+            hass,
+            address,
+            entry.entry_id,
+            on_pinedog=lambda: _switch_to_pinedog(hass, entry),
         )
         # Advertisements come many times a second; the coordinator's schedule gates them.
         matcher = {"address": address, "connectable": True}
@@ -70,18 +73,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> b
     return True
 
 
+def _switch_to_pinedog(hass: HomeAssistant, entry: PinedogConfigEntry) -> None:
+    """Store the Pinedog firmware on the entry once, then reload it on the Pinedog path."""
+    if entry.data.get("firmware") == FIRMWARE_PINEDOG:
+        return
+    # Store the firmware first, so a second report does not reload again.
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "firmware": FIRMWARE_PINEDOG})
+    hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
+
+
 def _upgrade_callback(hass: HomeAssistant, entry: PinedogConfigEntry):
     @callback
     def _on_advertisement(info: BluetoothServiceInfoBleak, change) -> None:
         stored = entry.data.get("firmware", FIRMWARE_PINEDOG)
         if detected_firmware(stored, info.service_uuids) == stored:
             return
-        # Store the new firmware first, so a second advertisement does not reload again.
-        hass.config_entries.async_update_entry(entry, data={**entry.data, "firmware": FIRMWARE_PINEDOG})
-        hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
+        _switch_to_pinedog(hass, entry)
 
     return _on_advertisement
-
-
-async def async_unload_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> bool:
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
