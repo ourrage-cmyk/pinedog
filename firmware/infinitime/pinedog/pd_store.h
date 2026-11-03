@@ -52,6 +52,7 @@ struct pd_store {
   uint32_t acked;      /* absolute count of records acknowledged (and dropped) */
   uint32_t written;    /* absolute count of records on flash */
   uint8_t boot;        /* boot counter, mod 256 */
+  uint8_t boot_unsaved; /* boot counter changed since it was last saved */
 };
 
 /*

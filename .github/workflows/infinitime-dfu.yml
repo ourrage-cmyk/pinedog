@@ -56,20 +56,29 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           bash pinedog/firmware/infinitime/apply.sh infinitime
+        env:
+          PINEDOG_REV: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install resource build dependencies
         run: |
           apt-get update
-          apt-get -y install --no-install-recommends python3-pil gcc-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
+          apt-get -y install --no-install-recommends python3-pil
 
       - name: Point the image toolchain at GCC 10.3
         run: |
-          # /opt/build.sh links with the image's GCC 15.3 no matter what PATH says.
-          # 1.14.1 targets GCC 10.3 (apt gcc-arm-none-eabi 10.3-2021.10), so the
-          # image's toolchain directory is moved aside and replaced with a link to /usr.
-          mv /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi.unused
-          ln -s /usr /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi
-          /opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc --version | head -n 1
+          # /opt/build.sh links with the image's GCC 15.3 no matter what PATH says, so the
+          # image's toolchain path is replaced with the official Arm GNU Toolchain 10.3-2021.10,
+          # which is what upstream builds with. Apt's GCC 10.3 gave an image that hung on the
+          # watch and rolled back (watch 2, 2026-11-01).
+          set -e
+          link=/opt/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi
+          mv "$link" "$link.unused"
+          curl -sSL -o /tmp/arm-10.tar.bz2 https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2
+          sha256sum /tmp/arm-10.tar.bz2
+          mkdir -p /opt/arm10
+          tar -xjf /tmp/arm-10.tar.bz2 -C /opt/arm10 --strip-components=1
+          ln -s /opt/arm10 "$link"
+          "$link/bin/arm-none-eabi-gcc" --version | head -n 1
 
       - name: Build
         env:

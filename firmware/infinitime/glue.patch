@@ -111,7 +111,7 @@ index ab50fa7..f4af0eb 100644
  int stackOverflowCount = 0;
  extern "C" {
 diff --git a/src/systemtask/SystemTask.cpp b/src/systemtask/SystemTask.cpp
-index b245e39..90cd3ef 100644
+index b245e39..d7fd0a1 100644
 --- a/src/systemtask/SystemTask.cpp
 +++ b/src/systemtask/SystemTask.cpp
 @@ -1,4 +1,5 @@
@@ -147,17 +147,68 @@ index b245e39..90cd3ef 100644
  
    twiMaster.Init();
    /*
-@@ -431,6 +436,10 @@ void SystemTask::UpdateMotion() {
+@@ -303,6 +308,10 @@ void SystemTask::Work() {
+           if (nrf_gpio_pin_read(Pinetime::PinMap::Button) == 0) {
+             action = buttonHandler.HandleEvent(Controllers::ButtonHandler::Events::Release);
+           } else {
++            // Pinedog: the collar covers the button, so a press counts only on the charger.
++            if (!batteryController.IsPowerPresent()) {
++              break;
++            }
+             action = buttonHandler.HandleEvent(Controllers::ButtonHandler::Events::Press);
+             // This is for faster wakeup, sacrificing special longpress and doubleclick handling while sleeping
+             if (IsSleeping()) {
+@@ -417,11 +426,6 @@ void SystemTask::UpdateMotion() {
+     return;
+   }
+ 
+-  if (state == SystemTaskState::Sleeping && !(settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::RaiseWrist) ||
+-                                              settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::Shake))) {
+-    return;
+-  }
+-
+   if (stepCounterMustBeReset) {
+     motionSensor.ResetStepCounter();
+     stepCounterMustBeReset = false;
+@@ -431,7 +435,24 @@ void SystemTask::UpdateMotion() {
  
    motionController.Update(motionValues.x, motionValues.y, motionValues.z, motionValues.steps);
  
-+  // Pinedog logger: same 100 ms tick, so no extra sensor reads or wake-ups.
+-  if (settingsController.GetNotificationStatus() != Controllers::Settings::Notification::Sleep) {
++  // Pinedog logger: runs with the screen off too. SPI and the flash sleep then, so they wake
++  // only on ticks that have flash work (a batch flush, a stream, or a time/ack/request).
++  const bool wakeFlash = state == SystemTaskState::Sleeping && pinedogService.FlashWorkDue();
++  if (wakeFlash) {
++    spi.Wakeup();
++    spiNorFlash.Wakeup();
++  }
 +  pinedogService.OnMotion(motionValues.x, motionValues.y, motionValues.z);
 +  pinedogService.Tick();
++  if (wakeFlash) {
++    if (BootloaderVersion::IsValid()) {
++      spiNorFlash.Sleep();
++    }
++    spi.Sleep();
++  }
 +
-   if (settingsController.GetNotificationStatus() != Controllers::Settings::Notification::Sleep) {
++  // Pinedog: motion wakes the screen only while the collar is on the charger.
++  if (settingsController.GetNotificationStatus() != Controllers::Settings::Notification::Sleep && batteryController.IsPowerPresent()) {
      if ((settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::RaiseWrist) &&
           motionController.ShouldRaiseWake()) ||
+         (settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::Shake) &&
+@@ -488,8 +509,10 @@ void SystemTask::OnTouchEvent() {
+   if (state == SystemTaskState::Running) {
+     PushMessage(Messages::OnTouchEvent);
+   } else if (state == SystemTaskState::Sleeping) {
+-    if (settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::SingleTap) or
+-        settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::DoubleTap)) {
++    // Pinedog: touch wakes the screen only while the collar is on the charger.
++    if (batteryController.IsPowerPresent() and
++        (settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::SingleTap) or
++         settingsController.isWakeUpModeOn(Pinetime::Controllers::Settings::WakeUpMode::DoubleTap))) {
+       PushMessage(Messages::TouchWakeUp);
+     }
+   }
 diff --git a/src/systemtask/SystemTask.h b/src/systemtask/SystemTask.h
 index 79f1cf4..36e5c65 100644
 --- a/src/systemtask/SystemTask.h
