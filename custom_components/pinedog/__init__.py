@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import Union
 
 from homeassistant.components import bluetooth
-from homeassistant.components.bluetooth import BluetoothScanningMode
+from homeassistant.components.bluetooth import BluetoothScanningMode, BluetoothServiceInfoBleak
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 
 from .const import FIRMWARE_PINEDOG, FIRMWARE_STOCK
 from .firmware_kind import detected_firmware
@@ -55,8 +55,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> b
             BluetoothScanningMode.PASSIVE,
         )
     )
+    if firmware == FIRMWARE_STOCK:
+        # The watch may be re-flashed while HA runs, or be out of range at startup.
+        # Watch for the Pinedog service, and switch the entry as soon as it shows up.
+        entry.async_on_unload(
+            bluetooth.async_register_callback(
+                hass,
+                _upgrade_callback(hass, entry),
+                {"address": address, "service_uuid": SERVICE_UUID},
+                BluetoothScanningMode.PASSIVE,
+            )
+        )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+def _upgrade_callback(hass: HomeAssistant, entry: PinedogConfigEntry):
+    @callback
+    def _on_advertisement(info: BluetoothServiceInfoBleak, change) -> None:
+        stored = entry.data.get("firmware", FIRMWARE_PINEDOG)
+        if detected_firmware(stored, info.service_uuids) == stored:
+            return
+        # Store the new firmware first, so a second advertisement does not reload again.
+        hass.config_entries.async_update_entry(entry, data={**entry.data, "firmware": FIRMWARE_PINEDOG})
+        hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
+
+    return _on_advertisement
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> bool:
