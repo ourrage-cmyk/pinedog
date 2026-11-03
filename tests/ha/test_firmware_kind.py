@@ -52,3 +52,13 @@ def test_gatt_table_with_pinedog_service_upgrades_a_stock_entry():
 def test_gatt_table_of_stock_infinitime_keeps_the_stock_entry():
     gatt = ["00001801-0000-1000-8000-00805f9b34fb", "00001530-1212-efde-1523-785feabcd123"]
     assert detected_firmware(FIRMWARE_STOCK, gatt) == FIRMWARE_STOCK
+
+
+def test_integration_module_defines_setup_and_unload():
+    # Home Assistant marks an entry "Unload not supported" when this function is missing,
+    # and a reload then fails. Check the module source, since it needs Home Assistant to import.
+    import ast
+
+    tree = ast.parse((PKG_DIR / "__init__.py").read_text())
+    names = {node.name for node in tree.body if isinstance(node, ast.AsyncFunctionDef)}
+    assert {"async_setup_entry", "async_unload_entry"} <= names

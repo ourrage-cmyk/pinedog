@@ -92,3 +92,7 @@ def _upgrade_callback(hass: HomeAssistant, entry: PinedogConfigEntry):
         _switch_to_pinedog(hass, entry)
 
     return _on_advertisement
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> bool:
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
