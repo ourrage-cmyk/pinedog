@@ -163,15 +163,34 @@ uint8_t PinedogService::BootId() const {
   return static_cast<uint8_t>(store.boot & PD_BOOT_MASK);
 }
 
+uint32_t PinedogService::CurrentMinute(bool& synced) const {
+  const auto unixSeconds =
+    std::chrono::duration_cast<std::chrono::seconds>(dateTime.CurrentDateTime().time_since_epoch()).count();
+  synced = unixSeconds >= static_cast<int64_t>(kMinValidUnix);
+  return synced ? static_cast<uint32_t>(unixSeconds / 60) : static_cast<uint32_t>(dateTime.Uptime().count() / 60);
+}
+
+bool PinedogService::FlashWorkDue() const {
+  if (!storeReady) {
+    return false;
+  }
+  if (stream != Stream::Idle || requestPending.load() || timePending.load() || ackPending.load()) {
+    return true;
+  }
+  if (batchCount >= kBatchRecords) {
+    return true;
+  }
+  // A minute roll closes the window into one more record, which can fill the batch.
+  bool synced = false;
+  return windowOpen && batchCount + 1 >= kBatchRecords && CurrentMinute(synced) != summary.minute;
+}
+
 void PinedogService::OnMotion(int16_t x, int16_t y, int16_t z) {
   if (!storeReady) {
     return;
   }
-  const auto unixSeconds =
-    std::chrono::duration_cast<std::chrono::seconds>(dateTime.CurrentDateTime().time_since_epoch()).count();
-  const bool synced = unixSeconds >= static_cast<int64_t>(kMinValidUnix);
-  const uint32_t minute = synced ? static_cast<uint32_t>(unixSeconds / 60)
-                                 : static_cast<uint32_t>(dateTime.Uptime().count() / 60);
+  bool synced = false;
+  const uint32_t minute = CurrentMinute(synced);
 
   if (!windowOpen) {
     pd_summary_reset(&summary, minute);
@@ -200,7 +219,10 @@ void PinedogService::CloseWindow(bool synced) {
   rec.class_byte = static_cast<uint8_t>(cls | (BootId() << PD_BOOT_SHIFT) | (synced ? 0 : PD_UNSYNCED_FLAG));
   rec.crc = pd_record_crc(&rec);
 
-  batch[batchCount++] = rec;
+  // If the store keeps refusing writes, the batch fills up and then drops records instead of overrunning.
+  if (batchCount < sizeof(batch) / sizeof(batch[0])) {
+    batch[batchCount++] = rec;
+  }
   if (batchCount >= kBatchRecords) {
     FlushBatch();
   }

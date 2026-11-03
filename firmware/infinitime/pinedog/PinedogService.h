@@ -55,6 +55,8 @@ namespace Pinetime {
       void OnMotion(int16_t x, int16_t y, int16_t z);
       /* Called from the 100 ms motion tick: flushes, applies Time/Ack, sends a stream. */
       void Tick();
+      /* True when this tick may write or read flash: a batch flush, a stream, or a time/ack/request. */
+      bool FlashWorkDue() const;
 
       /* GATT entry point, used by the characteristic callbacks. */
       int OnAccess(uint16_t connHandle, uint16_t attrHandle, struct ble_gatt_access_ctxt* ctxt);
@@ -63,6 +65,7 @@ namespace Pinetime {
       enum class Stream : uint8_t { Idle, Streaming, Done };
 
       void CloseWindow(bool synced);
+      uint32_t CurrentMinute(bool& synced) const;
       void FlushBatch();
       uint8_t BootId() const;
       void StartStream(uint16_t connHandle);
@@ -78,7 +81,7 @@ namespace Pinetime {
       pd_summary summary {};
       bool windowOpen = false;
       bool windowSynced = false;
-      pd_record batch[5] {};
+      pd_record batch[16] {}; // kBatchRecords flushes; the rest is headroom while the flash refuses writes
       uint8_t batchCount = 0;
 
       // Set by GATT callbacks (NimBLE host context), read in Tick().
