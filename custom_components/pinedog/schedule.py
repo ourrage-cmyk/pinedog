@@ -25,3 +25,15 @@ def should_attempt(
         return True
     interval = retry_interval if last_failed else success_interval
     return now - last_attempt >= interval
+
+
+
+def synced_recently(now: datetime, last_sync: datetime | None, window: timedelta) -> bool:
+    """True when this watch synced successfully within the window, so it can be skipped.
+
+    Stock collars use the motion cap as the window. Any longer gap between syncs is
+    credited as unknown, not as motion, so a skip must never stretch the gap past the cap.
+    """
+    if last_sync is None:
+        return False
+    return now - last_sync < window

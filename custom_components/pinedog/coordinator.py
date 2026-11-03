@@ -17,7 +17,7 @@ from .storage import STORE_VERSION, WoofStore
 from .activity import NOT_WORN, Baseline, DailyTotals, Record, compute_baseline, daily_totals
 from .transfer import FUTURE_SLACK_MINUTES
 from .protocol import sync_requested
-from .schedule import should_attempt
+from .schedule import RETRY_INTERVAL, should_attempt
 from .sync import async_pull_records
 from .transfer import IncompleteTransfer, TransferResult
 
@@ -59,7 +59,9 @@ class _State:
 
 class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
     def __init__(self, hass: HomeAssistant, address: str, entry_id: str) -> None:
-        super().__init__(hass, _LOGGER, name="Pinedog", update_interval=None)
+        # A timer checks the attempt gate every RETRY_INTERVAL, so a sync happens even when no
+        # advertisement carries the Pinedog UUID (passive scans never see the scan response).
+        super().__init__(hass, _LOGGER, name="Pinedog", update_interval=RETRY_INTERVAL)
         self.address = address
         self._store: Store[dict] = WoofStore(hass, STORE_VERSION, f"pinedog.{entry_id}")
         self._state = _State()

@@ -6,6 +6,7 @@ so the sensors and binary sensors do not need to know which firmware is running.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 import logging
 import time
@@ -17,8 +18,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .activity import Baseline, compute_baseline
+from .const import FIRMWARE_PINEDOG, FIRMWARE_STOCK
+from .firmware_kind import detected_firmware
 from .coordinator import PinedogData
-from .schedule import should_attempt
+from .schedule import should_attempt, synced_recently
 from .stock_ble import async_read_watch
 from .stock_motion import DayLog, MAX_INTERVAL_S, activity_index
 from .storage import STORE_VERSION, WoofStore
@@ -34,9 +37,16 @@ POLL_INTERVAL = timedelta(seconds=MAX_INTERVAL_S)
 
 
 class StockCoordinator(DataUpdateCoordinator[PinedogData]):
-    def __init__(self, hass: HomeAssistant, address: str, entry_id: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        address: str,
+        entry_id: str,
+        on_pinedog: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__(hass, _LOGGER, name="Pinedog stock", update_interval=POLL_INTERVAL)
         self.address = address
+        self._on_pinedog = on_pinedog
         self._store = WoofStore(hass, STORE_VERSION, f"pinedog_stock.{entry_id}")
         self.log = DayLog()
         self._last_sync: datetime | None = None
@@ -53,7 +63,8 @@ class StockCoordinator(DataUpdateCoordinator[PinedogData]):
         self.data = self._build()
 
     async def _async_update_data(self) -> PinedogData:
-        if self._busy:
+        if self._busy or synced_recently(dt_util.utcnow(), self._last_sync, SUCCESS_INTERVAL):
+            # Another poll is running, or this collar synced inside its turn window.
             return self._build()
         self._busy = True
         self._last_attempt = dt_util.utcnow()
@@ -67,6 +78,8 @@ class StockCoordinator(DataUpdateCoordinator[PinedogData]):
             self._busy = False
 
         self._last_error = None
+        if self._on_pinedog and detected_firmware(FIRMWARE_STOCK, reading.service_uuids) == FIRMWARE_PINEDOG:
+            self._on_pinedog()
         now_utc = dt_util.utcnow()
         local = dt_util.as_local(now_utc).replace(tzinfo=None)
         if reading.battery_pct is not None:
@@ -110,7 +123,7 @@ class StockCoordinator(DataUpdateCoordinator[PinedogData]):
 
         Advertisements arrive many times a second, so the schedule gate matters.
         """
-        if self._busy:
+        if self._busy or synced_recently(dt_util.utcnow(), self._last_sync, SUCCESS_INTERVAL):
             return
         if not should_attempt(
             dt_util.utcnow(),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 from bleak import BleakClient
@@ -13,31 +14,43 @@ from .ble_lock import BLE_LOCK
 from .protocol import ACK_UUID, RECORDS_UUID, REQUEST_UUID, STATUS_UUID, TIME_UUID, encode_u32
 from .transfer import PersistFn, TransferResult, run_transfer
 
+_LOGGER = logging.getLogger(__name__)
+
 
 class BleakLink:
     """Implements transfer.Link on top of an open BleakClient."""
 
     def __init__(self, client: BleakClient) -> None:
         self._client = client
+        self._notifications = 0
 
     async def write_time(self, unix_s: int) -> None:
+        _LOGGER.debug("Pinedog sync: writing clock")
         await self._client.write_gatt_char(TIME_UUID, encode_u32(unix_s), response=True)
 
     async def read_status(self) -> bytes:
-        return bytes(await self._client.read_gatt_char(STATUS_UUID))
+        status = bytes(await self._client.read_gatt_char(STATUS_UUID))
+        _LOGGER.debug("Pinedog sync: status %s", status.hex())
+        return status
 
     async def subscribe(self, on_data) -> None:
+        self._notifications = 0
+
         def _callback(_sender, data: bytearray) -> None:
+            self._notifications += 1
             on_data(bytes(data))
 
         await self._client.start_notify(RECORDS_UUID, _callback)
+        _LOGGER.debug("Pinedog sync: subscribed to records")
 
     async def unsubscribe(self) -> None:
+        _LOGGER.debug("Pinedog sync: record notifications received: %d", self._notifications)
         # The link may already be gone when a transfer fails, so skip the call then.
         if self._client.is_connected:
             await self._client.stop_notify(RECORDS_UUID)
 
     async def request(self) -> None:
+        _LOGGER.debug("Pinedog sync: requesting records")
         # The watch ignores the payload and streams every pending record.
         await self._client.write_gatt_char(REQUEST_UUID, encode_u32(0), response=True)
 
