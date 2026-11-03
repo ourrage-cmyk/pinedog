@@ -234,10 +234,16 @@ uint32_t PinedogService::CurrentMinute(bool& synced) const {
 }
 
 bool PinedogService::FlashWorkDue() const {
+  // Tick opens the store once, after boot. That reads and writes flash, so SPI must be awake.
   if (!storeReady) {
-    return false;
+    return !storeOpenTried;
   }
-  if (stream != Stream::Idle || requestPending.load() || timePending.load() || ackPending.load()) {
+  // Each of these reaches flash from Tick, so the sleep path must wake SPI for them too.
+  if (stream != Stream::Idle || requestPending.load() || timePending.load() || ackPending.load() || namePending.load()) {
+    return true;
+  }
+  // Over the cap, Tick acks (and so writes) older records away.
+  if (statusPending.load() > kMaxPendingRecords) {
     return true;
   }
   if (batchCount >= kBatchRecords) {
