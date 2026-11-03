@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import FIRMWARE_PINEDOG, FIRMWARE_STOCK
+from .firmware_kind import detected_firmware
 from .coordinator import PinedogCoordinator
 from .protocol import SERVICE_UUID
 from .stock_coordinator import StockCoordinator
@@ -28,7 +29,13 @@ type PinedogConfigEntry = ConfigEntry[PinedogRuntime]
 
 async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> bool:
     address: str = entry.data["address"]
-    if entry.data.get("firmware", FIRMWARE_PINEDOG) == FIRMWARE_STOCK:
+    stored = entry.data.get("firmware", FIRMWARE_PINEDOG)
+    last = bluetooth.async_last_service_info(hass, address, connectable=True)
+    firmware = detected_firmware(stored, last.service_uuids if last else None)
+    if firmware != stored:
+        # The watch was re-flashed after this entry was made. Use the firmware it runs now.
+        hass.config_entries.async_update_entry(entry, data={**entry.data, "firmware": firmware})
+    if firmware == FIRMWARE_STOCK:
         coordinator: Union[PinedogCoordinator, StockCoordinator] = StockCoordinator(
             hass, address, entry.entry_id
         )
