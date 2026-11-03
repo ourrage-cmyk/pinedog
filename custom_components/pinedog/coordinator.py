@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 import logging
+from typing import Any
 
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.core import HomeAssistant, callback
@@ -19,7 +20,7 @@ from .transfer import FUTURE_SLACK_MINUTES
 from .protocol import sync_requested
 from .schedule import should_attempt
 from .sync import async_pull_records
-from .transfer import IncompleteTransfer, TransferResult
+from .transfer import IncompleteTransfer, TransferResult, stage_failure
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             await self._sync()
             self._last_error = None
         except Exception as err:  # noqa: BLE001 - keep sensors alive on any BLE error
-            self._last_error = str(err) or type(err).__name__
+            self._last_error = str(stage_failure(err))
             _LOGGER.warning("Pinedog sync failed, will retry: %s", self._last_error)
         finally:
             self._busy = False
@@ -146,9 +147,40 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             dt_util.utcnow(), self._last_attempt, self._last_error is not None
         )
 
-    async def _sync(self) -> None:
+    async def _sync(self) -> TransferResult:
         result = await async_pull_records(self.hass, self.address, self._persist)
         self._apply_result(result)
+        return result
+
+    async def async_sync_now(self) -> dict[str, Any]:
+        """Sync right away, ignoring the retry schedule. Used by the Sync now button and service.
+
+        Returns the outcome. On failure, "stage" names where it stopped (not seen, connect,
+        GATT, transfer, clock, store) and "detail" says why. The same text becomes Last sync error.
+        """
+        if self._busy:
+            return {"result": "busy", "detail": "a sync is already running"}
+        self._busy = True
+        self._last_attempt = dt_util.utcnow()
+        try:
+            result = await self._sync()
+        except Exception as err:  # noqa: BLE001 - report every failure with its stage
+            failure = stage_failure(err)
+            self._last_error = str(failure)
+            _LOGGER.warning("Pinedog sync now failed at %s: %s", failure.stage, failure.detail)
+            outcome = {"result": "failed", "stage": failure.stage, "detail": failure.detail}
+        else:
+            self._last_error = None
+            outcome = {
+                "result": "ok",
+                "received": result.received,
+                "stored": result.stored,
+                "pending_left": self._pending,
+            }
+        finally:
+            self._busy = False
+        self.async_set_updated_data(self._build())
+        return outcome
 
     def _apply_result(self, result: TransferResult) -> None:
         if result.status is not None:
@@ -162,7 +194,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         self._dropped_unplaced += result.unplaced
         if result.status is not None and result.status.pending and not result.acked:
             raise IncompleteTransfer(
-                f"transfer incomplete: got {result.received} of {result.status.pending} records, nothing acked"
+                f"got {result.received} of {result.status.pending} records, nothing acked"
             )
         if result.corrupt or result.unplaced:
             _LOGGER.warning(

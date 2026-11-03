@@ -137,6 +137,26 @@ watch does not accept pairing outside a window opened by the button.
 Without a button press, Home Assistant only tries about every 30 minutes after a
 success, or every 5 minutes after a failure.
 
+### Sync now
+
+Each custom-firmware collar has a **Sync now** button. Press it to connect right
+away, pull the stored records, and skip the retry schedule. The collar must be
+in range. Home Assistant can only connect to a collar it has seen advertising
+recently. If it cannot be reached, the button shows where the sync stopped:
+
+| Stage | Meaning |
+|---|---|
+| not seen | No advertisement from the collar recently. Wake it and keep it near the Pi. |
+| connect | Home Assistant could not open a connection. |
+| GATT | A read, write or subscribe failed on the connection. |
+| transfer | The stream did not finish, or fewer records arrived than the watch reported. Nothing was acknowledged. |
+| clock | The Home Assistant clock is not set. |
+| store | Home Assistant could not save the records. Nothing was acknowledged. |
+
+The same service is available as `pinedog.sync_now`. Leave out the target to
+sync every collar, or pass button entities. It returns the outcome per collar,
+so you can call it from an automation or a script and read the result.
+
 ## What you see on the watch
 
 The screen is off unless you press the button. A press shows:
@@ -183,7 +203,7 @@ are recorded as not worn and left out of the totals.
 | No Pinedog device in Home Assistant | The watch must be advertising. Press the button for a sync window. Check the Bluetooth adapter in Settings → Devices. |
 | Pairing failed | Press the button, then submit within 60 seconds. |
 | Last sync error says insufficient encryption | The watch is not bonded to this Home Assistant. Repeat Step 6. |
-| Pending count never falls | The transfer is failing before the ack. Look at Last sync error and the Home Assistant log for `pinedog`. |
+| Pending count never falls | Press **Sync now**. The error names the stage where the transfer stops. The Home Assistant log for `pinedog` has the same detail. |
 | Clock says NOT SET | Normal until the first successful sync. |
 | Watch resets often | Look at the boot count on the screen. The watchdog resets the chip if it hangs. Report the number and when it changed. |
 

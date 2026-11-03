@@ -1,0 +1,15 @@
+sync_now:
+  name: Sync now
+  description: >-
+    Connect to each collar now, pull the records it has stored, and report the
+    result. A failure says where it stopped: not seen, connect, GATT, transfer,
+    clock or store. Ignores the usual retry schedule.
+  fields:
+    entity_id:
+      name: Collars
+      description: Sync button entities to use. Leave out to sync every collar.
+      required: false
+      selector:
+        entity:
+          domain: button
+          integration: pinedog
