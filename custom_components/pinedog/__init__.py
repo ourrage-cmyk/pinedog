@@ -46,7 +46,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> b
         matcher = {"address": address, "connectable": True}
     else:
         coordinator = PinedogCoordinator(hass, address, entry.entry_id)
-        matcher = {"address": address, "service_uuid": SERVICE_UUID}
+        # Match by address, not by UUID: the UUID is in the scan response, which passive scans miss.
+        matcher = {"address": address, "connectable": True}
 
     await coordinator.async_load()
     entry.runtime_data = PinedogRuntime(coordinator)

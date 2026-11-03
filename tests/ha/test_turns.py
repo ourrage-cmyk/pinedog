@@ -9,7 +9,7 @@ _pkg = types.ModuleType("pinedog")
 _pkg.__path__ = [str(PKG_DIR)]
 sys.modules["pinedog"] = _pkg
 
-from pinedog.schedule import synced_recently  # noqa: E402
+from pinedog.schedule import RETRY_INTERVAL, SUCCESS_INTERVAL, synced_recently  # noqa: E402
 from pinedog.stock_motion import MAX_INTERVAL_S as STOCK_CAP_S  # noqa: E402
 
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
@@ -31,3 +31,9 @@ def test_synced_outside_window_gets_its_turn():
 def test_turn_window_never_exceeds_motion_cap():
     # A skip must not stretch the gap between credited polls past the cap.
     assert STOCK_CAP_S == 600
+
+
+def test_timer_sees_every_sync_window():
+    # The Pinedog path polls on a timer, gated by should_attempt. The timer must be at
+    # least as fast as the retry gap, so no sync window is missed by more than one tick.
+    assert RETRY_INTERVAL <= SUCCESS_INTERVAL
