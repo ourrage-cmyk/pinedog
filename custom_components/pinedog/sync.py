@@ -56,11 +56,19 @@ class BleakLink:
         await _gatt(self._client.write_gatt_char(ACK_UUID, encode_u32(count), response=True))
 
 
+# A collar that has not advertised for this long is out of range. Trying to connect to it
+# only ties up the Pi's few connection slots for about a minute before it fails.
+MAX_ADVERTISEMENT_AGE_S = 60
+
+
 def _device(hass: HomeAssistant, address: str):
-    device = bluetooth.async_ble_device_from_address(hass, address, connectable=True)
-    if device is None:
-        raise SyncFailed("not seen", "no advertisement from the collar recently; wake it and keep it near the Pi")
-    return device
+    info = bluetooth.async_last_service_info(hass, address, connectable=True)
+    if info is None:
+        raise SyncFailed("not seen", "no advertisement from the collar; wake it and keep it near the Pi")
+    age = time.monotonic() - info.time
+    if age > MAX_ADVERTISEMENT_AGE_S:
+        raise SyncFailed("not seen", f"last advertisement {int(age)} s ago; the collar is out of range")
+    return info.device
 
 
 async def _disconnect(client: BleakClient) -> None:
