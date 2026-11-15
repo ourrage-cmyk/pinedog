@@ -1,319 +1,294 @@
 # Pinedog
 
-> **Current version: integration 0.4.0.** Both collars run the InfiniTime build
-> at commit `d47029c` (InfiniTime 1.14.1 with the Pinedog service). The SWD steps
-> below apply only to the older v0.2.1 Zephyr image, and are not needed for the
-> current collars. Do not flash v0.2.0: it never sends records to Home Assistant.
+Pinedog turns a first-generation PineTime into a dog activity collar. The watch
+reads its accelerometer, keeps one motion summary per minute, and hands those
+summaries to Home Assistant over Bluetooth when the collar is in range. Home
+Assistant turns them into daily active, sedentary and walking time, a usual
+pattern for the dog, and the collar's battery level.
 
-Turns a first-generation PineTime into a dog activity logger. The watch
-records one motion summary per minute, stores it on the watch, and hands it to
-Home Assistant over Bluetooth when the two are in range. Home Assistant shows
-active, sedentary and walking time per day, a 7-day baseline, and the
-collar's battery.
+The collar has no heart-rate sensor, no GPS and no step counter in use. The
+screen stays off while the collar is worn. Everything below comes from the
+accelerometer alone.
 
-> **Status: untested on hardware.** The firmware and the Home Assistant
-> integration are built and unit-tested on a computer. Nothing has been
-> flashed to a watch or run against a live Home Assistant yet. Read
-> [What is not verified](#what-is-not-verified) before you flash.
+## What you get
 
-The firmware image replaces InfiniTime on the watch. It has no clock face,
-no heart-rate sensor, and no over-the-air updates. Flashing it is one-way
-unless you keep a backup, so follow the backup step.
+| Entity | What it means |
+|---|---|
+| Active time today | Minutes classed as light, walk or run. |
+| Sedentary time today | Minutes classed as rest. |
+| Walking time today | Minutes classed as walk or run. |
+| Wear time today | Active plus sedentary minutes. Charging minutes are not counted. |
+| Motion today | Sum of the minute activity counts for the day. |
+| Activity vs 14-day usual | Today so far, scaled to a full day, as a percent of this dog's usual. 100 is typical. |
+| Activity vs baseline | `learning`, `waiting`, `below`, `normal` or `above`, compared with the 14-day usual. |
+| Baseline confidence | How much of the 14-day usual comes from this dog's own data. |
+| Activity vs long-term usual | Today so far, as a percent of the usual for the same hours of the week. |
+| Long-term days learned | Days that have taught the long-term usual. |
+| Battery | Charge percent reported by the collar. |
+| Charging | On while the collar is on its charger. |
+| Charge soon | On at 20 % or less while not charging. |
+| Unsynced records | Minutes the collar holds that Home Assistant has not stored yet. |
+| Last sync | When the last sync succeeded. |
+| Last sync error | The last failure, with the stage where it stopped. Empty after a good sync. |
+| Sync now (button) | Connects to the collar at once and pulls its stored records. |
+| Reset learning (button) | Starts the dog's usual pattern again from now. |
+| `pinedog.sync_now` (service) | The same sync as the button, for automations. Returns the outcome per collar. |
 
-## Install the Home Assistant integration with HACS
+## How the numbers are made
 
-The integration is not in the default HACS list. Add this repository as a
-custom repository:
+The accelerometer measures acceleration along three axes, and nothing else. Every
+number above is derived from that. Some steps are direct measurements. Others are
+rules, or estimates that improve as data arrives. Each step below says which.
 
-1. In Home Assistant, open **HACS** (Community Store).
-2. Open the menu (⋮) at the top right and choose **Custom repositories**.
-3. Paste `https://github.com/ourrage-cmyk/pinedog`, set the category to
-   **Integration**, and click **Add**.
-4. Search for **Pinedog** in HACS, open it, and click **Download**. Choose the
-   latest version (0.4.0 or newer).
-5. Restart Home Assistant (Settings → System → Restart).
-6. Continue with [Step 6: pair the watch](#step-6-pair-the-watch). The watch
-   still has to be flashed first (Steps 1–4).
+### 1. The collar: a reading every 100 ms (measured)
 
-## Update to version 0.4.0 with HACS
+The collar reads the accelerometer ten times a second. Each reading gives a total
+acceleration, the vector length of the three axes, in units of gravity (g). A dog
+standing or lying still gives about 1 g, whatever way the collar is turned,
+because gravity is the only steady force. Movement pushes that length above and
+below 1 g. The watch uses only how far the length strays from 1 g, so the
+collar's orientation does not matter.
 
-This update needs no flashing. Only Home Assistant changes.
+### 2. The collar: one summary per minute (measured, then rules)
 
-1. In Home Assistant, open **HACS → Integrations → Pinedog**. Click the refresh
-   icon at the top right if no update appears.
-2. If it shows **Update**, click it, then **Download**. If not, open the ⋮ menu
-   and choose **Redownload**, then pick version 0.4.0 or `main`.
-3. Restart Home Assistant fully: Settings → System → Restart. Reloading the
+For each minute the collar works out three things.
+
+- **Counts** (the movement amount). The distance from 1 g is added up over the
+  minute's readings and scaled to a full minute, so a minute with a few readings
+  is not read as rest. Roughly, a count of 50 means the collar strayed from 1 g by
+  about 0.08 g on average, and a count of 1200 means about 2 g on average. Counts
+  saturate at 65 535.
+- **Rhythm** (cadence). The collar counts how often the movement swings back
+  through its average, and turns that into cycles per second. It is a rough
+  stand-in for step rate.
+- **Class**, from fixed rules:
+
+  | Class | Rule |
+  |---|---|
+  | Rest | counts below 50 |
+  | Light | everything else that is not walk or run |
+  | Walk | counts at least 300 and rhythm at least 1.5 cycles per second |
+  | Run | counts at least 1200 and rhythm at least 3 cycles per second |
+
+  A minute with large counts but no clear rhythm is light. A minute with no
+  readings at all is recorded as rest.
+
+  These thresholds are fixed guesses. They have not yet been checked against
+  video of this dog.
+
+- **Not worn.** Any minute spent on the charger is recorded as not worn. Not-worn
+  minutes are left out of every total.
+
+Each minute becomes one 8-byte record. The collar keeps records until Home
+Assistant confirms it has stored them, and holds about 60 days at most.
+
+### 3. Home Assistant: day totals (direct sums)
+
+Home Assistant adds up each day's records in its own time zone:
+
+- Active = light, walk and run minutes.
+- Sedentary = rest minutes.
+- Walking = walk and run minutes.
+- Motion = the sum of the minute counts.
+
+Sedentary does not mean "not worn". A dog asleep all day gives about 1 440
+sedentary minutes. A collar left lying still off the dog, and not on the charger,
+also looks like rest, so keep it on the dog.
+
+### 4. The 14-day usual: what "normal" means for this dog (estimate)
+
+The usual is the expected full-day motion for this dog, learned from its own
+recent days:
+
+1. **Full-day figure.** Each past day with at least 6 hours of wear becomes
+   `motion × 1 440 ÷ worn minutes`. A day worn for 12 hours is scaled up to a
+   full day, so partly worn days can be compared.
+2. **Log scale.** The figures are worked on a logarithmic scale, because motion
+   varies over a wide range.
+3. **Recent days count more.** A day counts half as much as the day after it
+   for every 14 days of age. Only the last 14 days are used.
+4. **Robust centre.** The centre is a weighted median, not an average. One odd day,
+   such as a bath, a vet visit or a broken collar, does not move it much. The
+   spread is the median absolute deviation, with a floor of 0.25 on the log
+   scale, so a run of identical days does not look too certain.
+5. **Starting guess.** Until the dog has data, the estimate is pulled toward a
+   generic guess of 100 counts a minute. That guess is worth one day, so it
+   fades after the first real day.
+6. **Weekday adjustment.** The same calculation is repeated on that weekday's
+   history, and blended into the all-days figure. With only 14 days of history
+   there are at most two past days of any one weekday, so this adjustment is weak
+   for now.
+
+From that expected value:
+
+- **Activity vs 14-day usual** is today's full-day figure divided by the expected
+  value, times 100. Today's figure is extrapolated from the wear so far, so it is
+  an estimate early in the day.
+- **Status** stays `learning` until seven valid days exist, and `waiting` until
+  there is an hour of wear today. After that it is `below`, `normal` or `above`
+  depending on whether today's figure is more than one spread away from the
+  usual. With the minimum spread, `normal` covers roughly 78 % to 128 % of the
+  usual.
+- **Baseline confidence** is the share of the estimate that comes from data
+  rather than the starting guess. It is 50 % after one full day, and it levels off
+  near 90 % because only 14 days are used.
+
+### 5. The long-term usual: same hours, every week (estimate)
+
+The long-term usual is kept separately, so it is not reset by the 14-day window.
+
+- There is one slot for each hour of the week, 168 in all. Each finished day
+  adds its motion for every hour that had at least 30 minutes of wear.
+- Values are stored on a log scale and averaged with a half-life of eight weeks.
+  The usual can change with the seasons, but slowly.
+- **Activity vs long-term usual** compares today's hours so far with the usual
+  for those same hours of the week. Only hours with at least 30 minutes of wear
+  today, and at least one earlier observation, are compared. It appears after
+  seven days with at least six worn hours each.
+
+### What is measured and what is estimated
+
+| Measured or recorded directly | Estimated or derived |
+|---|---|
+| Acceleration readings, and the minute counts from them | Rest, light, walk or run: fixed rules applied to counts and rhythm |
+| Rhythm (cycles per second) | Walking versus other active time: rhythm is a rough proxy |
+| Charging state and the collar's battery percent | Full-day figures, the usual, the percents, the status and the confidence |
+| Sync times, errors and the unsynced count | The long-term usual |
+
+### What the sensor cannot tell
+
+- It does not know where the dog is, or what its heart rate is.
+- Car rides, being carried, a rough play session, or a collar knocked against
+  something all look like motion. They can count as light, walk or run.
+- A dog lying still on a sofa and a collar lying still on a table look the same.
+- Thresholds are rules, not calibration against this dog. Treat the numbers as a
+  consistent index for this dog over time, not as calories or distance.
+
+## Install
+
+### 1. The collar: Pinedog firmware
+
+The collar needs the Pinedog build of InfiniTime 1.14.1. Its Bluetooth firmware
+revision starts with `1.14.1-pd`. The build is a DFU zip that installs over
+Bluetooth, so no programmer is needed. The full steps are in
+[docs/PHONE_INSTALL.md](docs/PHONE_INSTALL.md). In short:
+
+1. Get the DFU zip. In the repository's Actions tab, open the latest successful
+   run of **InfiniTime store-and-sync DFU** and download the artifact
+   `pinedog-infinitime-dfu`. Unzip it once, keep the inner
+   `pinedog-infinitime-…-dfu.zip`, and check it against `SHA256SUMS`.
+2. Charge the collar to at least 50 %. Disconnect any other app from it, such as
+   Gadgetbridge, because the watch accepts one Bluetooth connection at a time.
+3. Keep the stock InfiniTime DFU zip so you can roll back.
+4. In nRF Connect (Android or iPhone), connect to `InfiniTime`, tap **DFU**,
+   choose **Distribution packet (ZIP)** and select the zip. Wait for the
+   transfer to finish and for the watch to restart.
+5. On the watch, open **Settings → Firmware** and tap **Validate**. If you do not
+   validate, the bootloader reverts to the previous firmware on the next reboot.
+
+Do not install the `.hex` files in `firmware/release/` or `release/`. They are
+an older build that needs an SWD programmer and overwrites the bootloader.
+
+Collars on unmodified InfiniTime also work, with fewer features. See
+[Stock InfiniTime collars](#stock-infinitime-collars) below.
+
+### 2. Home Assistant: the integration
+
+Home Assistant 2025.1 or later, with the Bluetooth integration.
+
+1. In HACS, open the menu (⋮) and choose **Custom repositories**. Add
+   `https://github.com/ourrage-cmyk/pinedog` with the category **Integration**.
+2. Search for **Pinedog**, open it and choose **Download**.
+3. Restart Home Assistant fully (**Settings → System → Restart**). Reloading the
    integration is not enough, because the new code loads only on restart.
-4. Check it works: see [How to check it works](#how-to-check-it-works).
+4. Within about a minute of the collar being in range, **Pinedog** appears under
+   **Settings → Devices & services**. Configure it and name the dog.
 
-HACS needs Home Assistant 2025.1 or later and the Bluetooth integration. Home
-Assistant also needs a working Bluetooth adapter; see the list below.
+To update later, use HACS in the same way, then restart Home Assistant fully.
+Manual install is possible too: copy `custom_components/pinedog` into your
+`config/custom_components/` folder and restart.
 
-Manual install, if HACS is not available: copy `custom_components/pinedog`
-into your Home Assistant `config/custom_components/` folder and restart.
+### 3. Bluetooth on the Home Assistant host
 
-## What you need
+- The built-in Bluetooth of a Raspberry Pi 4 works. Keep the collar within a few
+  metres of the adapter at first.
+- The adapter has few connection slots, so collars sync one at a time. A second
+  collar waits for the first to finish.
+- A collar that is resting sends only occasional advertisements, so an at-home
+  sync can start several minutes after its scheduled time.
+- No pairing is needed.
 
-| Item | Notes |
-|---|---|
-| A first-generation PineTime | Not the PineTime Pro or dev kit. |
-| An SWD programmer | Nordic nRF52 DK (PCA10040), or a Segger J-Link. The DK's built-in debugger works. |
-| Four pogo pins or thin jumper wires | To reach the SWD pads on the watch's board. |
-| A computer with nRF Command Line Tools | Provides `nrfjprog`. Install from Nordic's website. |
-| Home Assistant with Bluetooth | Tested on Core 2026.10.2 on a Raspberry Pi 4. The Pi's built-in Bluetooth is assumed. |
-| The release files | `firmware/release/` in this repo, with `SHA256SUMS`. |
+## Sync behaviour
 
-**SWD pads.** This guide does not list the exact pad positions, because I could
-not confirm them from the sources available here. Check the Pine64 wiki's
-PineTime pinout before you open the watch. The pads need the four signals
-SWDIO, SWCLK, GND and 3V3 (or VTG on the DK).
+Home Assistant checks every minute whether a collar is in range.
 
-## Step 1: check the release file
+- **At home.** After a successful sync, the next automatic attempt is 30 minutes
+  later.
+- **After a failure.** The next attempt is 5 minutes later.
+- **Coming back.** A collar that has been out of range for 5 minutes or more
+  syncs as soon as it is seen again, provided the last attempt was at least 5
+  minutes ago. A dog that goes out on a run and comes home gets its records in
+  Home Assistant straight away.
+- **Sync now.** The button and the `pinedog.sync_now` service ignore the schedule.
+  They fail at once if a sync is already running.
 
-From the folder with the release files:
-
-```sh
-sha256sum -c SHA256SUMS
-```
-
-Both lines must say `OK`. If not, do not flash.
-
-## Step 2: back up the stock firmware
-
-This is the step that keeps the watch recoverable. It reads the whole
-internal flash (bootloader, InfiniTime, and settings) into a file.
-
-```sh
-nrfjprog --readcode stock-backup.hex
-```
-
-Keep `stock-backup.hex` somewhere safe. It is the only way back to exactly
-the watch you have now. The external SPI flash, which holds watch faces and
-the boot logo, is not in this backup.
-
-## Step 3: flash Pinedog
-
-```sh
-nrfjprog --program pinedog-pinetime-v0.2.1.hex --chiperase --verify --reset
-```
-
-- `--chiperase` erases internal flash only. The external SPI flash, where
-  Pinedog keeps its records, is not touched.
-- `--verify` reads the image back and compares it.
-
-The screen stays dark after a reset. That is expected.
-
-## Step 4: return to InfiniTime (if you want)
-
-Pinedog has no way to go back over Bluetooth. To restore your original watch:
-
-```sh
-nrfjprog --program stock-backup.hex --chiperase --verify --reset
-```
-
-If you have no backup, use InfiniTime's own SWD guide
-(`doc/SWD.md` in the InfiniTime repository). It flashes the bootloader at
-`0x0000` and the application at `0x8000` from the InfiniTime release files.
-
-## Step 5: install the Home Assistant integration
-
-Use HACS (see [above](#install-the-home-assistant-integration-with-hacs)), or copy
-`custom_components/pinedog` into `config/custom_components/` by hand. Then restart
-Home Assistant (Settings → System → Restart).
-
-Keep the watch in the same room as the Home Assistant Bluetooth adapter at first.
-Within about a minute, Settings → Devices & services shows **Pinedog collar found**.
-
-## Step 6: pair the watch
-
-Pairing is needed once. The watch refuses it unless you press its button
-first.
-
-1. In Home Assistant, click **Configure** on the discovered collar, then
-   confirm.
-2. The next screen says *Pair the collar*. Press the watch button now. The
-   screen turns on and a 60-second pairing window opens.
-3. Submit the form in Home Assistant within 60 seconds.
-
-If you see *Pairing failed*, press the button again and submit again. The
-watch does not accept pairing outside a window opened by the button.
-
-## Step 7: the first sync
-
-1. Press the watch button. The screen comes on for 30 seconds and shows the
-   status page. The watch also opens a 60-second sync window.
-2. Home Assistant sees the request in the advertisement and connects. Look at
-   the **Unsynced records** sensor. It should fall to 0.
-3. Check **Last sync error**. It should be empty.
-
-Without a button press, Home Assistant tries about every 30 minutes after a
-success, or every 5 minutes after a failure. When a collar comes back into range
-after being out of range for 5 minutes or more, for example after a run, it
-syncs straight away. A dog that stays in range does not trigger a sync.
-
-### Sync now
-
-Each custom-firmware collar has a **Sync now** button. Press it to connect right
-away, pull the stored records, and skip the retry schedule. The collar must be
-in range. Home Assistant can only connect to a collar it has seen advertising
-recently. If it cannot be reached, the button shows where the sync stopped:
-
-| Stage | Meaning |
-|---|---|
-| not seen | No advertisement from the collar recently. Wake it and keep it near the Pi. |
-| connect | Home Assistant could not open a connection. |
-| GATT | A read, write or subscribe failed on the connection. |
-| transfer | The stream did not finish, or fewer records arrived than the watch reported. Nothing was acknowledged. |
-| clock | The Home Assistant clock is not set. |
-| store | Home Assistant could not save the records. Nothing was acknowledged. |
+Records only move after Home Assistant has stored them. Nothing is lost if the
+link drops part way: the collar resends from where Home Assistant left off.
 
 ### Reset learning
 
-Each custom-firmware collar also has a **Reset learning** button. It clears the daily
-totals, the 14 day usual and the long-term usual for that dog, and learning starts
-again from that moment. Records the collar made earlier and has not sent yet are
-skipped when they arrive. Use it after days of wrong data, for example when the
-collar was not worn.
-
-The same service is available as `pinedog.sync_now`. Leave out the target to
-sync every collar, or pass button entities. It returns the outcome per collar,
-so you can call it from an automation or a script and read the result.
-
-The collars sync one at a time, because the Raspberry Pi's Bluetooth chip has
-few connection slots. A second collar waits for the first to finish.
-
-## How to check it works
-
-1. Settings → Devices & services → Pinedog: each collar has a **Sync now** button.
-2. Developer tools → Actions: search for `pinedog.sync_now`. It should be listed.
-3. Press **Sync now** on a collar. If it succeeds, **Last sync error** is empty.
-   If it fails, the notification names the stage, and the same text appears in
-   **Last sync error**.
-4. Take a collar out of range for 5 minutes or more, then bring it back. Its
-   **Last sync** should update on its own, without a button press.
-
-## What you see on the watch
-
-The screen is off unless you press the button. A press shows:
-
-```
-PINEDOG
-BATTERY 87% CHARGING        battery percent; CHARGING while on the charger
-PENDING 124 RECORDS         records the watch still holds
-LAST SYNC 42 RECORDS        last transfer that was acked (RAM, reset on reboot)
-SYNC AGO 15 MIN             time since that transfer
-ACTIVE 24H 312 MIN          active minutes in the last 24 hours (clock must be set)
-CLOCK SET                   CLOCK NOT SET until the first sync
-BOOT 5 UP 3600 S            boot count and uptime, for debugging
-BONDS 1 PAIRED              bonded phones or hubs
-SYNC WINDOW 45 S            time left before the sync window closes
-```
-
-The screen turns itself off after 30 seconds. Pressing the button again turns
-it on and refreshes the values.
-
-## What Home Assistant gets
-
-| Entity | Meaning |
-|---|---|
-| Active time today | Minutes with light, walk or run activity. Charging minutes are left out. |
-| Sedentary time today | Minutes at rest. A quiet dog is still counted here. |
-| Walking time today | Minutes classed as walk or run. |
-| Motion today | Sum of activity counts. |
-| Activity vs baseline | Compared with the last 7 days, once there is enough history. |
-| Battery | Percent, as reported by the watch. |
-| Charging | On while the watch is on its charger. |
-| Charge soon | On at 20 % or below, when not charging. |
-| Unsynced records | Records the watch still holds. |
-| Last sync error | The last failure, empty after a good sync. |
-
-Every minute of the day is recorded, including quiet minutes. Charging minutes
-are recorded as not worn and left out of the totals.
+Reset learning clears the dog's daily totals, the 14-day usual and the long-term
+usual. Learning starts again from that moment. Today's totals restart from zero
+too, so they count only minutes recorded after the reset. Records the collar made
+earlier and has not yet sent are skipped when they arrive. Use it after days of
+wrong data, for example when the collar was not worn.
 
 ## Troubleshooting
 
-| Symptom | What to check |
+**Last sync error** names the stage where a sync stopped:
+
+| Stage | Meaning |
 |---|---|
-| Nothing on the screen after a press | The release file may not be flashed. Check Step 3 for errors. A dim or blank screen also points to the display driver. Restore your backup and report the failure. |
-| No Pinedog device in Home Assistant | The watch must be advertising. Press the button for a sync window. Check the Bluetooth adapter in Settings → Devices. |
-| Pairing failed | Press the button, then submit within 60 seconds. |
-| Last sync error says insufficient encryption | The watch is not bonded to this Home Assistant. Repeat Step 6. |
-| Pending count never falls | Press **Sync now**. The error names the stage where the transfer stops. The Home Assistant log for `pinedog` has the same detail. |
-| No Sync now buttons after an update | Restart Home Assistant fully (Settings → System → Restart). A reload is not enough. |
-| Clock says NOT SET | Normal until the first successful sync. |
-| Watch resets often | Look at the boot count on the screen. The watchdog resets the chip if it hangs. Report the number and when it changed. |
+| not seen | No advertisement from the collar recently. Keep it in range of the adapter. |
+| connect | Home Assistant could not open a connection. |
+| GATT | A read, write or subscribe failed on the connection. |
+| transfer | The stream stopped, or fewer records arrived than the collar reported. Nothing was acknowledged, so nothing was lost. |
+| clock | The Home Assistant clock is not set. |
+| store | Home Assistant could not save the records. Nothing was acknowledged. |
 
-## Recovering a bricked watch
+| Symptom | What to do |
+|---|---|
+| Unsynced records do not fall | Press **Sync now** and read the stage in the error. |
+| Buttons or the service are missing after an update | Restart Home Assistant fully. |
+| Sync keeps failing at "not seen" | Check the collar is awake and in range, and that the adapter is working. |
+| Usual shows `learning` | Normal for the first week. |
 
-If the watch shows nothing and does not respond to the button, it may have
-crashed in a bad state. Use the SWD connection and Step 4 to flash the backup.
-A backup taken in Step 2 always restores the old behaviour.
+## Stock InfiniTime collars
 
-## What is not verified
+A collar on unmodified InfiniTime can be read too. It is polled instead of
+keeping a record queue, so some things are missing:
 
-Everything below is still to be checked on a real watch:
+- No walking time, no unsynced count, and no Sync now or Reset learning buttons.
+- Sedentary and active time are set by a rule, not measured. Once the collar has
+  30 readings, the quietest 30 % of its own readings count as sedentary. So about
+  a third of the time is sedentary by design until more data is available.
+- It has an **In range** sensor, which is on when the last poll reached the collar.
 
-- Flashing, boot, and the screen (font, orientation, backlight pin).
-- The button, the 30-second screen timeout, and the sync window.
-- Charging detection (pins P0.12 and P0.19, taken from the InfiniTime source,
-  not measured on this board).
-- The battery voltage curve.
-- Bluetooth bonding and `client.pair()` in BlueZ on the Raspberry Pi.
-- Record CRCs and the transfer over the air.
-- Battery life. The sensor wakes the CPU 25 times a second, which is almost
-  certainly too much. Measure for a week before trusting any figure.
-- The activity thresholds. They are guesses and need tuning on real data.
+See [docs/STOCK_INFINITIME.md](docs/STOCK_INFINITIME.md) for setup.
+
+## Known limits
+
+- Battery life has not yet been measured for this build.
+- The thresholds in the table above are fixed guesses and have not been tuned on
+  this dog.
+- The collar's Bluetooth link is not paired or encrypted. Anyone in Bluetooth
+  range who can open that connection could read the records, so keep the
+  collar's link to your own Home Assistant host.
+
+For developers, the sync wire format is in
+[docs/SYNC_PROTOCOL.md](docs/SYNC_PROTOCOL.md) and the firmware port is described in
+[firmware/infinitime/README.md](firmware/infinitime/README.md).
 
 ## License
 
-MIT (see `LICENSE`). Zephyr is Apache-2.0 and is compatible.
-
-The battery voltage-to-percent table and the charging and power pins in
-`firmware/app/src/battery.c` match InfiniTime's values, which are in its GPL-3.0
-source (`BatteryController.cpp`, `PinMap.h`). The code here is written from
-scratch; the table values are measurements of the same LiPo and divider, and
-are not copied from InfiniTime's code. If you need a stricter reading, the owner
-should check that before reusing the image commercially. The stock firmware
-images are not included in this repo.
-
-## GitHub repo settings (optional)
-
-The repository description and topics are optional. HACS shows them, but they
-are not needed to install or use the integration from a custom repository. The
-validation workflow skips them, and brand assets, for that reason.
-
-## Releasing a version
-
-The version lives in `custom_components/pinedog/manifest.json`. HACS offers the
-latest GitHub release when one exists, and otherwise tracks the default branch.
-Version 0.4.0 has no release tag yet, so HACS tracks `main` for it. To publish a
-release, follow these steps:
-
-1. Set `version` in `manifest.json` (for example `0.4.1`).
-2. Merge to the default branch.
-3. Tag and push: `git tag v0.4.1 && git push origin v0.4.1`.
-
-`release.yml` checks that the tag matches the manifest and creates the release.
-It attaches the firmware files in `firmware/release/`, so check that they match
-the release before you publish.
-`validate.yml` runs HACS and hassfest checks, plus the host tests, on every push.
-
-## Repository layout
-
-| Path | Contents |
-|---|---|
-| `firmware/app/` | Zephyr application for the PineTime. |
-| `firmware/core/` | Pure C logic, tested on a computer. |
-| `firmware/release/` | Built image, ELF file, and checksums. |
-| `custom_components/pinedog/` | Home Assistant integration (installed by HACS). |
-| `hacs.json` | HACS metadata. |
-| `.github/workflows/` | Validation and release automation. |
-| `tests/ha/` | Python tests for the integration. |
-| `docs/DESIGN.md` | System design. |
-| `docs/FIRMWARE.md` | Firmware reference and known gaps. |
-| `docs/RESEARCH.md` | Notes on storage and the design choices behind them. |
-
-## Pinedog (stock InfiniTime collar)
-
-If your collar runs unmodified InfiniTime, no flashing or pairing is needed. See [docs/STOCK_INFINITIME.md](docs/STOCK_INFINITIME.md) for the Home Assistant setup, the Raspberry Pi Bluetooth setup, and what the watch can and cannot measure.
+MIT (see `LICENSE`). InfiniTime is GPL-3.0 and the firmware build includes it.
