@@ -1,4 +1,4 @@
-"""Sync now: a button per custom-firmware collar that pulls its records at once."""
+"""Buttons per custom-firmware collar: Sync now, and Reset learning."""
 
 from __future__ import annotations
 
@@ -19,7 +19,8 @@ async def async_setup_entry(
     # Stock InfiniTime has no record queue to sync, so it gets no button.
     if entry.data.get("firmware", FIRMWARE_PINEDOG) != FIRMWARE_PINEDOG:
         return
-    async_add_entities([PinedogSyncButton(entry.runtime_data.coordinator, entry)])
+    coordinator = entry.runtime_data.coordinator
+    async_add_entities([PinedogSyncButton(coordinator, entry), PinedogResetLearningButton(coordinator, entry)])
 
 
 class PinedogSyncButton(PinedogEntity, ButtonEntity):
@@ -34,3 +35,15 @@ class PinedogSyncButton(PinedogEntity, ButtonEntity):
             raise HomeAssistantError("A sync is already running. Try again in a moment.")
         if outcome["result"] == "failed":
             raise HomeAssistantError(f"Sync failed at {outcome['stage']}: {outcome['detail']}")
+
+
+class PinedogResetLearningButton(PinedogEntity, ButtonEntity):
+    """Starts the dog's usual pattern again from now. Use after days of wrong or missing data."""
+
+    _attr_icon = "mdi:restart"
+
+    def __init__(self, coordinator: PinedogCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "reset_learning", "Reset learning")
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_reset_learning()

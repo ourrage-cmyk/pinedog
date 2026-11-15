@@ -168,6 +168,14 @@ recently. If it cannot be reached, the button shows where the sync stopped:
 | clock | The Home Assistant clock is not set. |
 | store | Home Assistant could not save the records. Nothing was acknowledged. |
 
+### Reset learning
+
+Each custom-firmware collar also has a **Reset learning** button. It clears the daily
+totals, the 14 day usual and the long-term usual for that dog, and learning starts
+again from that moment. Records the collar made earlier and has not sent yet are
+skipped when they arrive. Use it after days of wrong data, for example when the
+collar was not worn.
+
 The same service is available as `pinedog.sync_now`. Leave out the target to
 sync every collar, or pass button entities. It returns the outcome per collar,
 so you can call it from an automation or a script and read the result.
