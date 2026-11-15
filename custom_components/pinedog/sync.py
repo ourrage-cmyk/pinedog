@@ -61,6 +61,12 @@ class BleakLink:
 MAX_ADVERTISEMENT_AGE_S = 60
 
 
+def collar_in_range(hass: HomeAssistant, address: str) -> bool:
+    """True when the collar advertised within the last minute."""
+    info = bluetooth.async_last_service_info(hass, address, connectable=True)
+    return info is not None and time.monotonic() - info.time <= MAX_ADVERTISEMENT_AGE_S
+
+
 def _device(hass: HomeAssistant, address: str):
     info = bluetooth.async_last_service_info(hass, address, connectable=True)
     if info is None:
