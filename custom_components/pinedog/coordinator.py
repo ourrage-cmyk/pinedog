@@ -56,6 +56,9 @@ class _State:
     # counted already, so a resend after a lost ack is not double counted.
     last_stored_minute: int = -1
     days: dict[str, dict[str, int]] = field(default_factory=dict)
+    # Unix minute of the last Reset learning. Older records, such as a backlog the collar
+    # still holds, are stored past but never counted.
+    learn_from_minute: int = 0
 
 
 class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
@@ -84,6 +87,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         self._state = _State(
             last_stored_minute=raw.get("last_stored_minute", -1),
             days=raw.get("days", {}),
+            learn_from_minute=raw.get("learn_from_minute", 0),
         )
         last = raw.get("last_sync")
         self._last_sync = datetime.fromisoformat(last) if last else None
@@ -219,6 +223,9 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
                 continue
             seen.add(rec.minute)
             fresh.append(rec)
+        newest = max((rec.minute for rec in fresh), default=cursor)
+        # Records from before a Reset learning move the cursor but are not counted.
+        fresh = [rec for rec in fresh if rec.minute >= self._state.learn_from_minute]
         tz = dt_util.get_default_time_zone()
         for day, totals in daily_totals(fresh, tz).items():
             cur = self._state.days.setdefault(
@@ -235,17 +242,33 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             self._longterm.observe(local, rec.counts, worn)
         for key in sorted(self._state.days)[:-KEEP_DAYS]:
             del self._state.days[key]
-        if fresh:
-            self._state.last_stored_minute = max(cursor, max(rec.minute for rec in fresh))
+        self._state.last_stored_minute = max(cursor, newest)
         self._last_sync = dt_util.utcnow()
+        await self._save()
+
+    async def _save(self) -> None:
         await self._store.async_save(
             {
                 "last_stored_minute": self._state.last_stored_minute,
                 "days": self._state.days,
-                "last_sync": self._last_sync.isoformat(),
+                "learn_from_minute": self._state.learn_from_minute,
+                "last_sync": self._last_sync.isoformat() if self._last_sync else None,
                 "longterm": self._longterm.to_dict(),
             }
         )
+
+    async def async_reset_learning(self) -> None:
+        """Forget everything learned about this dog and start again from now.
+
+        Clears the daily totals, the 14 day usual and the long-term usual. The sync cursor
+        stays, so nothing is counted twice. Records the collar made before this moment and
+        has not sent yet are skipped when they arrive.
+        """
+        self._state.days = {}
+        self._state.learn_from_minute = int(dt_util.utcnow().timestamp()) // 60
+        self._longterm = LongTerm()
+        await self._save()
+        self.async_set_updated_data(self._build())
 
     @callback
     def handle_advertisement(self, info: BluetoothServiceInfoBleak, change) -> None:
