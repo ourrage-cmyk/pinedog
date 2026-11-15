@@ -115,10 +115,56 @@ def test_no_ack_when_end_marker_never_arrives():
     async def persist(records):
         raise AssertionError("must not persist a partial transfer")
 
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises(SyncFailed) as info:
         _run(link, persist, timeout_s=0.01)
+    assert info.value.stage == "transfer"
+    assert "stalled after 2 of" in info.value.detail
     assert not any(c[0] == "ack" for c in link.calls)
     assert ("unsubscribe",) in link.calls
+
+
+class SlowLink(FakeLink):
+    """Streams one record per step, each step well inside the stall limit."""
+
+    def __init__(self, count, step_s):
+        super().__init__(chunks=[_chunk(_record(100 + i, 1)) for i in range(count)])
+        self._step_s = step_s
+
+    async def request(self):
+        self.calls.append(("request",))
+        asyncio.get_running_loop().create_task(self._stream())
+
+    async def _stream(self):
+        for chunk in self.chunks:
+            await asyncio.sleep(self._step_s)
+            self._on_data(chunk)
+        self._on_data(bytes([0xEE]) + struct.pack("<I", self.end_count))
+
+
+def test_a_long_backlog_syncs_as_long_as_records_keep_arriving():
+    # Twelve days of records took longer than the old fixed 120 s limit, so the collar
+    # never synced again. The whole stream may now take many times the stall limit.
+    link = SlowLink(20, step_s=0.02)
+    stored = []
+
+    async def persist(recs):
+        stored.extend(recs)
+
+    result = _run(link, persist, timeout_s=0.1)  # the stream takes about 0.4 s in total
+    assert result.acked and result.received == 20 and len(stored) == 20
+    assert link.calls[-1] == ("ack", 20)
+
+
+def test_a_stream_that_never_ends_is_cut_at_the_overall_limit():
+    link = SlowLink(50, step_s=0.02)
+
+    async def persist(recs):
+        raise AssertionError("must not persist a partial transfer")
+
+    with pytest.raises(SyncFailed) as info:
+        asyncio.run(run_transfer(link, SYNC_UNIX, persist, timeout_s=0.1, max_s=0.2))
+    assert "not finished" in info.value.detail
+    assert not any(c[0] == "ack" for c in link.calls)
 
 
 def test_ack_is_a_count_even_when_minutes_go_backwards():

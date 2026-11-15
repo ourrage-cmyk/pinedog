@@ -85,8 +85,9 @@ def test_unknown_error_is_named_error_with_its_type():
 
 
 def test_stalled_stream_fails_as_transfer_and_acks_nothing():
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises(SyncFailed) as info:
         asyncio.run(run_transfer(StallingLink(), NOW, _persist_ok, timeout_s=0.05))
+    assert str(info.value) == "transfer: stream stalled after 0 of 3 records, nothing acked"
 
 
 class FullStreamLink(StallingLink):

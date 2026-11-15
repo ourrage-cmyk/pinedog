@@ -16,7 +16,12 @@ from typing import Protocol
 from .activity import KNOWN_CLASSES, Record
 from .protocol import Status, WireRecord, decode_chunk, decode_end_count, decode_status, is_end_marker
 
-TRANSFER_TIMEOUT_S = 120
+# The stream is judged by progress, not by total time. A collar that could not sync for
+# days holds many thousands of records, and a fixed limit failed every sync of such a
+# backlog, so the backlog only grew. The watch itself gives up after 30 s without progress.
+STALL_TIMEOUT_S = 45
+# Upper bound for one transfer, so a watch that trickles forever cannot hold the adapter.
+TRANSFER_TIMEOUT_S = 1800
 # Home Assistant has no RTC on a Pi. A clock before this is not set yet, so do not sync.
 MIN_PLAUSIBLE_UNIX = 1_672_531_200  # 2023-01-01T00:00:00Z
 # A record more than this many minutes ahead of the clock is treated as corrupt time.
@@ -86,7 +91,7 @@ def stage_failure(err: BaseException) -> SyncFailed:
     if isinstance(err, GattError):
         return SyncFailed("GATT", describe(err))
     if isinstance(err, TimeoutError):
-        return SyncFailed("transfer", f"no end of stream within {TRANSFER_TIMEOUT_S} s")
+        return SyncFailed("transfer", "no end of stream: the watch stopped answering")
     return SyncFailed("error", describe(err))
 
 
@@ -116,6 +121,30 @@ class RecordCollector:
         self.records.extend(decode_chunk(data))
 
 
+async def _wait_for_stream(
+    collector: RecordCollector, pending: int, stall_s: float, max_s: float
+) -> None:
+    """Wait for the end marker for as long as records keep arriving."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max_s
+    seen = -1
+    while not collector.finished.is_set():
+        got = len(collector.records)
+        if got == seen:
+            raise SyncFailed(
+                "transfer", f"stream stalled after {got} of {pending} records, nothing acked"
+            )
+        if loop.time() >= deadline:
+            raise SyncFailed(
+                "transfer", f"stream not finished in {int(max_s)} s ({got} of {pending} records)"
+            )
+        seen = got
+        try:
+            await asyncio.wait_for(collector.finished.wait(), timeout=stall_s)
+        except TimeoutError:
+            pass
+
+
 def place_unsynced(minute: int, boot_id: int, status: Status, sync_unix: int) -> int | None:
     """Unix minute for a record made before the clock was set, or None.
 
@@ -133,7 +162,8 @@ async def run_transfer(
     link: Link,
     now_unix: int,
     persist: PersistFn,
-    timeout_s: float = TRANSFER_TIMEOUT_S,
+    timeout_s: float = STALL_TIMEOUT_S,
+    max_s: float = TRANSFER_TIMEOUT_S,
 ) -> TransferResult:
     """Pull everything the watch still holds, store it, then ack it.
 
@@ -141,6 +171,8 @@ async def run_transfer(
     oldest records by that count, so an ack never names a minute that could
     repeat after a reboot. If the link drops, the end marker never arrives, or
     persist() raises, the watch is not acked and keeps its records.
+
+    timeout_s is how long the stream may make no progress. max_s bounds the whole stream.
     """
     if now_unix < MIN_PLAUSIBLE_UNIX:
         raise ClockError("Home Assistant clock is not set, not syncing")
@@ -153,7 +185,7 @@ async def run_transfer(
     await link.subscribe(collector.feed)
     try:
         await link.request()
-        await asyncio.wait_for(collector.finished.wait(), timeout=timeout_s)
+        await _wait_for_stream(collector, status.pending, timeout_s, max_s)
     finally:
         await link.unsubscribe()
 

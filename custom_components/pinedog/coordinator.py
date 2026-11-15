@@ -19,7 +19,7 @@ from .activity import NOT_WORN, Baseline, DailyTotals, Record, compute_baseline,
 from .transfer import FUTURE_SLACK_MINUTES
 from .protocol import sync_requested
 from .schedule import should_attempt, should_sync_on_return
-from .sync import async_pull_records
+from .sync import async_pull_records, collar_in_range
 from .transfer import IncompleteTransfer, TransferResult, stage_failure
 
 _LOGGER = logging.getLogger(__name__)
@@ -257,12 +257,27 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         in its advertisement. Then the normal retry schedule is skipped too. The watch advertises every 100 ms
         in that window, so a sync already running is not started again.
         """
+        self._consider_sync(sync_requested(info.manufacturer_data))
+
+    @callback
+    def handle_timer(self, _now: datetime | None = None) -> None:
+        """Run the schedule for a collar that is in range.
+
+        Home Assistant passes on an advertisement only when its content changes. A collar
+        that sits at home sends the same one all day, so without this timer it synced only
+        after a restart of Home Assistant.
+        """
+        if collar_in_range(self.hass, self.address):
+            self._consider_sync(False)
+
+    @callback
+    def _consider_sync(self, requested: bool) -> None:
         now = dt_util.utcnow()
         returned = should_sync_on_return(now, self._last_seen, self._last_attempt)
         self._last_seen = now
         if self._busy:
             return
-        if sync_requested(info.manufacturer_data) or returned:
+        if requested or returned:
             self._force_next = True
         elif not self._attempt_allowed():
             return

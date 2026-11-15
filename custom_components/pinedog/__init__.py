@@ -13,10 +13,11 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_time_interval
 
 from .const import DOMAIN, FIRMWARE_PINEDOG, FIRMWARE_STOCK
 from .coordinator import PinedogCoordinator
-from .protocol import SERVICE_UUID
+from .schedule import SCHEDULE_CHECK_INTERVAL
 from .stock_coordinator import StockCoordinator
 
 PLATFORMS = ["sensor", "binary_sensor", "button"]
@@ -77,7 +78,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> b
         matcher = {"address": address, "connectable": True}
     else:
         coordinator = PinedogCoordinator(hass, address, entry.entry_id)
-        matcher = {"address": address, "service_uuid": SERVICE_UUID}
+        # By address only. The service UUID is not in every advertisement the Pi hears
+        # (a passive scan may miss the part that carries it), and a collar matched on it
+        # was then never noticed at all.
+        matcher = {"address": address, "connectable": True}
 
     await coordinator.async_load()
     entry.runtime_data = PinedogRuntime(coordinator)
@@ -89,6 +93,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> b
             BluetoothScanningMode.PASSIVE,
         )
     )
+    if isinstance(coordinator, PinedogCoordinator):
+        # Home Assistant only reports an advertisement when its content changes, and a
+        # collar at rest sends the same one for days. This timer keeps the schedule running.
+        entry.async_on_unload(
+            async_track_time_interval(hass, coordinator.handle_timer, SCHEDULE_CHECK_INTERVAL)
+        )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

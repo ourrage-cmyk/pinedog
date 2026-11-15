@@ -10,6 +10,9 @@ RETRY_INTERVAL = timedelta(minutes=5)
 AWAY_INTERVAL = timedelta(minutes=5)
 # Never start a return sync sooner than this after the last attempt (edge-of-range flicker).
 RETURN_MIN_GAP = timedelta(minutes=5)
+# How often the schedule is checked for a collar in range. Home Assistant reports an
+# advertisement only when it changes, so advertisements alone cannot drive the schedule.
+SCHEDULE_CHECK_INTERVAL = timedelta(minutes=1)
 
 
 def should_attempt(
