@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -56,25 +57,66 @@ class BleakLink:
         await _gatt(self._client.write_gatt_char(ACK_UUID, encode_u32(count), response=True))
 
 
-# A collar that has not advertised for this long is out of range. Trying to connect to it
-# only ties up the Pi's few connection slots for about a minute before it fails.
-MAX_ADVERTISEMENT_AGE_S = 60
+# BlueZ forgets a device about 30 s after its last advertisement, and Home Assistant then
+# has no adapter that can reach it ("no backend with an available connection slot"). So a
+# connection only starts within a few seconds of an advertisement. 0.4.3 allowed 60 s, and
+# most of Bridget's attempts failed that way: her collar advertises only every few minutes.
+MAX_ADVERTISEMENT_AGE_S = 20
+# How often to look for a fresh advertisement while waiting for one.
+REACHABLE_POLL_S = 1.0
 
 
-def collar_in_range(hass: HomeAssistant, address: str) -> bool:
-    """True when the collar advertised within the last minute."""
+def advertisement_age(hass: HomeAssistant, address: str) -> float | None:
+    """Seconds since the collar's last advertisement, or None if it was never heard.
+
+    The time moves on every advertisement, even when its content repeats, although
+    Home Assistant calls the advertisement callback only when the content changes.
+    """
     info = bluetooth.async_last_service_info(hass, address, connectable=True)
-    return info is not None and time.monotonic() - info.time <= MAX_ADVERTISEMENT_AGE_S
+    return None if info is None else time.monotonic() - info.time
+
+
+def last_heard_monotonic(hass: HomeAssistant, address: str) -> float | None:
+    info = bluetooth.async_last_service_info(hass, address, connectable=True)
+    return None if info is None else info.time
+
+
+def collar_reachable(hass: HomeAssistant, address: str) -> bool:
+    """True when a connection to the collar can start right now."""
+    age = advertisement_age(hass, address)
+    if age is None or age > MAX_ADVERTISEMENT_AGE_S:
+        return False
+    try:
+        return bool(bluetooth.async_scanner_devices_by_address(hass, address, connectable=True))
+    except Exception:  # noqa: BLE001 - an older Home Assistant without this helper
+        return True
 
 
 def _device(hass: HomeAssistant, address: str):
-    info = bluetooth.async_last_service_info(hass, address, connectable=True)
-    if info is None:
+    age = advertisement_age(hass, address)
+    if age is None:
         raise SyncFailed("not seen", "no advertisement from the collar; wake it and keep it near the Pi")
-    age = time.monotonic() - info.time
-    if age > MAX_ADVERTISEMENT_AGE_S:
-        raise SyncFailed("not seen", f"last advertisement {int(age)} s ago; the collar is out of range")
-    return info.device
+    if not collar_reachable(hass, address):
+        raise SyncFailed("not seen", f"last advertisement {int(age)} s ago; waiting for the collar to advertise")
+    try:
+        found = bluetooth.async_scanner_devices_by_address(hass, address, connectable=True)
+    except Exception:  # noqa: BLE001
+        found = []
+    if found:
+        # The adapter that heard it best, from its current discovered devices.
+        return max(found, key=lambda d: d.advertisement.rssi).ble_device
+    return bluetooth.async_last_service_info(hass, address, connectable=True).device
+
+
+async def async_wait_reachable(hass: HomeAssistant, address: str, timeout_s: float) -> bool:
+    """Wait up to timeout_s for a fresh advertisement. Does not hold the Bluetooth lock."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while not collar_reachable(hass, address):
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(REACHABLE_POLL_S)
+    return True
 
 
 async def _disconnect(client: BleakClient) -> None:
@@ -91,7 +133,17 @@ async def async_pull_records(
     async with BLE_LOCK:
         device = _device(hass, address)
         try:
-            client = await establish_connection(BleakClient, device, "Pinedog", max_attempts=3)
+            client = await establish_connection(
+                BleakClient,
+                device,
+                "Pinedog",
+                max_attempts=3,
+                # Between attempts, use the newest device the adapter knows.
+                ble_device_callback=lambda: bluetooth.async_ble_device_from_address(
+                    hass, address, connectable=True
+                )
+                or device,
+            )
         except Exception as err:  # noqa: BLE001
             raise SyncFailed("connect", describe(err)) from err
         try:

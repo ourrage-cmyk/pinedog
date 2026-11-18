@@ -77,7 +77,7 @@ class FakeLink:
 
 
 def _run(link, persist, timeout_s=1.0):
-    return asyncio.run(run_transfer(link, SYNC_UNIX, persist, timeout_s=timeout_s))
+    return asyncio.run(run_transfer(link, SYNC_UNIX, persist, timeout_s=timeout_s, retry_pause_s=0))
 
 
 def test_persists_before_acking_with_the_record_count():
@@ -296,4 +296,49 @@ def test_short_stream_is_not_acked():
         pass
 
     _run(link, persist)
+    assert not any(c[0] == "ack" for c in link.calls)
+
+
+class FlakyLink(FakeLink):
+    """The first stream stalls after one record; the next request streams everything."""
+
+    def __init__(self, stalls=1):
+        super().__init__()
+        self.stalls = stalls
+
+    async def request(self):
+        if self.stalls:
+            self.stalls -= 1
+            self.calls.append(("request",))
+            self._on_data(self.chunks[0][:8])
+            return
+        await super().request()
+
+
+def test_a_stalled_stream_is_requested_again_on_the_same_link():
+    link = FlakyLink(stalls=1)
+    persisted = []
+
+    async def persist(records):
+        persisted.extend(records)
+
+    result = _run(link, persist, timeout_s=0.01)
+    assert result.acked and result.received == 2
+    assert [c[0] for c in link.calls].count("request") == 2
+    assert [c[0] for c in link.calls].count("subscribe") == 1
+    assert link.calls[-1] == ("ack", 2)
+    # The half record list from the stalled stream is not mixed into the good one.
+    assert [r.minute for r in persisted] == [100, 101]
+
+
+def test_a_stream_that_keeps_stalling_fails_after_the_retries():
+    link = FlakyLink(stalls=5)
+
+    async def persist(records):
+        raise AssertionError("must not persist a partial transfer")
+
+    with pytest.raises(SyncFailed) as info:
+        _run(link, persist, timeout_s=0.01)
+    assert info.value.stage == "transfer"
+    assert [c[0] for c in link.calls].count("request") == 3
     assert not any(c[0] == "ack" for c in link.calls)

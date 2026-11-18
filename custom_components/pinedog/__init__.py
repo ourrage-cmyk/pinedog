@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Union
 
 import voluptuous as vol
@@ -13,11 +14,10 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import async_track_time_interval
 
 from .const import DOMAIN, FIRMWARE_PINEDOG, FIRMWARE_STOCK
 from .coordinator import PinedogCoordinator
-from .schedule import SCHEDULE_CHECK_INTERVAL
+from .scheduler import SyncScheduler
 from .stock_coordinator import StockCoordinator
 
 PLATFORMS = ["sensor", "binary_sensor", "button"]
@@ -35,7 +35,11 @@ type PinedogConfigEntry = ConfigEntry[PinedogRuntime]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async def _handle_sync_now(call: ServiceCall) -> dict:
-        entries = _entries_for_call(hass, call)
+        # The collar that has gone longest without a sync goes first.
+        entries = sorted(
+            _entries_for_call(hass, call),
+            key=lambda e: e.runtime_data.coordinator.data.last_sync or datetime.min.replace(tzinfo=timezone.utc),
+        )
         collars = []
         for entry in entries:
             outcome = await entry.runtime_data.coordinator.async_sync_now()
@@ -94,11 +98,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PinedogConfigEntry) -> b
         )
     )
     if isinstance(coordinator, PinedogCoordinator):
-        # Home Assistant only reports an advertisement when its content changes, and a
-        # collar at rest sends the same one for days. This timer keeps the schedule running.
-        entry.async_on_unload(
-            async_track_time_interval(hass, coordinator.handle_timer, SCHEDULE_CHECK_INTERVAL)
-        )
+        # One scheduler for all collars: the one that has gone longest without a sync
+        # goes first. Its tick also covers advertisements Home Assistant does not pass on
+        # (it reports one only when the content changes).
+        scheduler = SyncScheduler.get(hass)
+        coordinator.scheduler = scheduler
+        entry.async_on_unload(scheduler.register(coordinator))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

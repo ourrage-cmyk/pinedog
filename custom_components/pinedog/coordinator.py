@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
@@ -18,8 +19,8 @@ from .storage import STORE_VERSION, WoofStore
 from .activity import NOT_WORN, Baseline, DailyTotals, Record, compute_baseline, daily_totals
 from .transfer import FUTURE_SLACK_MINUTES
 from .protocol import sync_requested
-from .schedule import should_attempt, should_sync_on_return
-from .sync import async_pull_records, collar_in_range
+from .schedule import Candidate, retry_interval_for, should_attempt, should_sync_on_return
+from .sync import async_pull_records, async_wait_reachable, collar_reachable, last_heard_monotonic
 from .transfer import IncompleteTransfer, TransferResult, stage_failure
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +28,9 @@ _LOGGER = logging.getLogger(__name__)
 SHORT_TERM_DAYS = 14
 KEEP_DAYS = 90  # the baseline reads up to WINDOW_DAYS; keep a margin
 LOW_BATTERY_PCT = 20
+# Sync now waits this long for the collar to advertise before it gives up. A sleeping
+# collar advertises only every few minutes.
+SYNC_NOW_WAIT_S = 240
 
 
 @dataclass
@@ -80,6 +84,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         self._dropped_unplaced = 0
         self._busy = False
         self._force_next = False
+        self.scheduler = None  # set by async_setup_entry
 
     async def async_load(self) -> None:
         raw = await self._store.async_load() or {}
@@ -132,9 +137,48 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         )
 
     async def _async_update_data(self) -> PinedogData:
-        forced, self._force_next = self._force_next, False
-        if not forced and not self._attempt_allowed():
-            return self._build()
+        # Syncs are started by the shared scheduler (scheduler.py), never by a refresh.
+        return self._build()
+
+    @property
+    def busy(self) -> bool:
+        return self._busy
+
+    def _attempt_allowed(self, now: datetime) -> bool:
+        return should_attempt(
+            now,
+            self._last_attempt,
+            self._last_error is not None,
+            retry_interval=retry_interval_for(now, self._last_sync),
+        )
+
+    @callback
+    def observe(self, now: datetime) -> None:
+        """Note the newest advertisement, and flag a sync when the collar has just come back."""
+        heard = last_heard_monotonic(self.hass, self.address)
+        if heard is None:
+            return
+        heard_at = now - timedelta(seconds=max(time.monotonic() - heard, 0.0))
+        if self._last_seen is not None and heard_at <= self._last_seen:
+            return
+        if should_sync_on_return(heard_at, self._last_seen, self._last_attempt):
+            self._force_next = True
+        self._last_seen = heard_at
+
+    def candidate(self, now: datetime) -> Candidate:
+        return Candidate(
+            key=self.address,
+            last_sync=self._last_sync,
+            due=not self._busy and (self._force_next or self._attempt_allowed(now)),
+            reachable=collar_reachable(self.hass, self.address),
+            last_heard=self._last_seen,
+        )
+
+    async def async_scheduled_sync(self) -> None:
+        """One sync chosen by the scheduler."""
+        if self._busy:
+            return
+        self._force_next = False
         self._busy = True
         self._last_attempt = dt_util.utcnow()
         try:
@@ -145,12 +189,7 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
             _LOGGER.warning("Pinedog sync failed, will retry: %s", self._last_error)
         finally:
             self._busy = False
-        return self._build()
-
-    def _attempt_allowed(self) -> bool:
-        return should_attempt(
-            dt_util.utcnow(), self._last_attempt, self._last_error is not None
-        )
+        self.async_set_updated_data(self._build())
 
     async def _sync(self) -> TransferResult:
         result = await async_pull_records(self.hass, self.address, self._persist)
@@ -166,8 +205,11 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
         if self._busy:
             return {"result": "busy", "detail": "a sync is already running"}
         self._busy = True
-        self._last_attempt = dt_util.utcnow()
         try:
+            # A sleeping collar advertises only every few minutes. Wait for it here rather
+            # than failing at once with "not seen".
+            await async_wait_reachable(self.hass, self.address, SYNC_NOW_WAIT_S)
+            self._last_attempt = dt_util.utcnow()
             result = await self._sync()
         except Exception as err:  # noqa: BLE001 - report every failure with its stage
             failure = stage_failure(err)
@@ -272,36 +314,13 @@ class PinedogCoordinator(DataUpdateCoordinator[PinedogData]):
 
     @callback
     def handle_advertisement(self, info: BluetoothServiceInfoBleak, change) -> None:
-        """Start a sync when the watch is seen.
+        """A button press on the watch sets a sync request in its advertisement.
 
-        A collar that was out of range and is back syncs at once, so a dog that
-        comes home from a run has its records in HA straight away. A dog that
-        stays in range does not. A button press on the watch sets a sync request
-        in its advertisement. Then the normal retry schedule is skipped too. The watch advertises every 100 ms
-        in that window, so a sync already running is not started again.
+        Then the normal schedule is skipped. The shared scheduler is asked to choose at
+        once, while the advertisement is fresh. Home Assistant calls this only when the
+        advertisement content changes; the scheduler's tick covers the rest.
         """
-        self._consider_sync(sync_requested(info.manufacturer_data))
-
-    @callback
-    def handle_timer(self, _now: datetime | None = None) -> None:
-        """Run the schedule for a collar that is in range.
-
-        Home Assistant passes on an advertisement only when its content changes. A collar
-        that sits at home sends the same one all day, so without this timer it synced only
-        after a restart of Home Assistant.
-        """
-        if collar_in_range(self.hass, self.address):
-            self._consider_sync(False)
-
-    @callback
-    def _consider_sync(self, requested: bool) -> None:
-        now = dt_util.utcnow()
-        returned = should_sync_on_return(now, self._last_seen, self._last_attempt)
-        self._last_seen = now
-        if self._busy:
-            return
-        if requested or returned:
+        if sync_requested(info.manufacturer_data):
             self._force_next = True
-        elif not self._attempt_allowed():
-            return
-        self.hass.async_create_task(self.async_request_refresh())
+        if self.scheduler is not None:
+            self.scheduler.kick()

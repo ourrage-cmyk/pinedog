@@ -20,6 +20,12 @@ from .protocol import Status, WireRecord, decode_chunk, decode_end_count, decode
 # days holds many thousands of records, and a fixed limit failed every sync of such a
 # backlog, so the backlog only grew. The watch itself gives up after 30 s without progress.
 STALL_TIMEOUT_S = 45
+# A stalled stream is asked for again on the same connection this many times. The watch
+# restarts the stream from its oldest record on every request, and reconnecting costs far
+# more than asking again, above all for a collar at the edge of range.
+STREAM_RETRIES = 2
+# Notifications from the stalled stream can still be in flight. Let them drain first.
+STREAM_RETRY_PAUSE_S = 1.0
 # Upper bound for one transfer, so a watch that trickles forever cannot hold the adapter.
 TRANSFER_TIMEOUT_S = 1800
 # Home Assistant has no RTC on a Pi. A clock before this is not set yet, so do not sync.
@@ -164,6 +170,7 @@ async def run_transfer(
     persist: PersistFn,
     timeout_s: float = STALL_TIMEOUT_S,
     max_s: float = TRANSFER_TIMEOUT_S,
+    retry_pause_s: float = STREAM_RETRY_PAUSE_S,
 ) -> TransferResult:
     """Pull everything the watch still holds, store it, then ack it.
 
@@ -173,6 +180,7 @@ async def run_transfer(
     persist() raises, the watch is not acked and keeps its records.
 
     timeout_s is how long the stream may make no progress. max_s bounds the whole stream.
+    A stalled stream is requested again on the same link, up to STREAM_RETRIES times.
     """
     if now_unix < MIN_PLAUSIBLE_UNIX:
         raise ClockError("Home Assistant clock is not set, not syncing")
@@ -182,10 +190,22 @@ async def run_transfer(
         return TransferResult(status, 0, 0, 0, 0, acked=False)
 
     collector = RecordCollector()
-    await link.subscribe(collector.feed)
+
+    def _feed(data: bytes) -> None:
+        collector.feed(data)
+
+    await link.subscribe(_feed)
     try:
-        await link.request()
-        await _wait_for_stream(collector, status.pending, timeout_s, max_s)
+        for attempt in range(STREAM_RETRIES + 1):
+            await link.request()
+            try:
+                await _wait_for_stream(collector, status.pending, timeout_s, max_s)
+                break
+            except SyncFailed:
+                if attempt == STREAM_RETRIES:
+                    raise
+            await asyncio.sleep(retry_pause_s)
+            collector = RecordCollector()
     finally:
         await link.unsubscribe()
 
